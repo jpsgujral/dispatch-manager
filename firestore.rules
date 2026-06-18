@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Active Collections matching our blueprint
+    match /companies/{id} {
+      allow read, write: if true;
+    }
+    match /vendors/{id} {
+      allow read, write: if true;
+    }
+    match /pos/{id} {
+      allow read, write: if true;
+    }
+    match /transporters/{id} {
+      allow read, write: if true;
+    }
+    match /agents/{id} {
+      allow read, write: if true;
+    }
+    match /sources/{id} {
+      allow read, write: if true;
+    }
+    match /dos/{id} {
+      allow read, write: if true;
+    }
+    match /users/{id} {
+      allow read, write: if true;
+    }
+    match /payments/{id} {
+      allow read, write: if true;
+    }
+    match /transporter_payments/{id} {
+      allow read, write: if true;
+    }
+  }
+}

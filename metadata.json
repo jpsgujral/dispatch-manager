@@ -1,0 +1,6 @@
+{
+  "name": "Bulker Dispatch Manager",
+  "description": "Manage Company, Vendor, Transporter, Agent masters, Purchase Orders, and dispatch orders for industrial powders (Fly Ash, GGBS, Micro Silica) in bulkers with automatic agent commission calculations and Challan document preview.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

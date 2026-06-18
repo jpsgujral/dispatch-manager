@@ -1,0 +1,155 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Lora", Georgia, serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-primary-editorial: #E65100; /* Deep Editorial Saffron Orange */
+  --color-sand-light: #F9F8F6;
+  --color-sand-medium: #F4F4F1;
+  --color-sand-strong: #D1D1CF;
+  --color-ink-black: #1A1A1A;
+}
+
+body {
+  background-color: var(--color-sand-light);
+  color: var(--color-ink-black);
+  font-family: var(--font-sans);
+}
+
+.font-serif-italic {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+/* Beautiful custom crisp editorial elements */
+.editorial-card {
+  background-color: #ffffff;
+  border: 1px solid var(--color-sand-strong);
+  border-radius: 0px; /* Editorial theme has straight premium cut edges */
+}
+
+.editorial-btn-primary {
+  background-color: var(--color-primary-editorial);
+  color: #ffffff;
+  border-radius: 0px;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.editorial-btn-primary:hover {
+  background-color: var(--color-ink-black);
+}
+
+.editorial-btn-secondary {
+  background-color: transparent;
+  color: var(--color-ink-black);
+  border: 1px solid var(--color-ink-black);
+  border-radius: 0px;
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+.editorial-btn-secondary:hover {
+  background-color: var(--color-ink-black);
+  color: #ffffff;
+}
+
+/* Custom gorgeous scrollbar for editorial logs */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-sand-light);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-sand-strong);
+}
+
+/* Perfect A4 Remittance Print & PDF Generation rules */
+@media print {
+  /* Hide everything by default on the body */
+  body * {
+    visibility: hidden !important;
+  }
+  
+  /* Make only the print sheet container and its heirs visible */
+  .print-container, 
+  .print-container * {
+    visibility: visible !important;
+  }
+  
+  /* Reset document and viewport parameters to flow normally */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Override fixed overlay constraints on the modal backdrop and wrapper elements */
+  #challan-modal,
+  #challan-modal > div,
+  .overflow-y-auto {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+  }
+
+  /* Place the print container absolutely at the top left without background shadows or scrollbars */
+  .print-container {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100% !important;
+    margin: 0 !important;
+    padding: 1.5cm !important; /* Elegant margin for physical printer heads */
+    z-index: 9999999 !important;
+    background: white !important;
+    color: black !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Force display of tables & prevent cutoffs */
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tfoot {
+    display: table-footer-group;
+  }
+
+  /* Explicitly hide standard interactive headers, action buttons download fields */
+  .no-print {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}
+

@@ -1,0 +1,226 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Company registration info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "gstin": { "type": "string" },
+        "contactNo": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "address", "createdAt"]
+    },
+    "Vendor": {
+      "title": "Vendor",
+      "description": "Vendor registration info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "gstin": { "type": "string" },
+        "plants": { "type": "array" },
+        "contactNo": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "address", "plants", "createdAt"]
+    },
+    "PurchaseOrder": {
+      "title": "PurchaseOrder",
+      "description": "Purchase Order rates contract info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "poNumber": { "type": "string" },
+        "companyId": { "type": "string" },
+        "vendorId": { "type": "string" },
+        "material": { "type": "string" },
+        "totalQuantity": { "type": "number" },
+        "vendorRate": { "type": "number" },
+        "effectiveDate": { "type": "string" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "poNumber", "companyId", "vendorId", "material", "totalQuantity", "vendorRate", "effectiveDate", "status", "createdAt"]
+    },
+    "Transporter": {
+      "title": "Transporter",
+      "description": "Transporter carrier info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "contactNo": { "type": "string" },
+        "vehicleCount": { "type": "number" },
+        "gstin": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "rates": { "type": "array" }
+      },
+      "required": ["id", "name", "address", "createdAt"]
+    },
+    "Agent": {
+      "title": "Agent",
+      "description": "Commission agent registration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "contactNo": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "SourceLocation": {
+      "title": "SourceLocation",
+      "description": "Loading/source location for minining/materials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "pincode": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "pincode", "createdAt"]
+    },
+    "DespatchOrder": {
+      "title": "DespatchOrder",
+      "description": "Logistics Despatch Order and transit challan tracking record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "date": { "type": "string" },
+        "poId": { "type": "string" },
+        "vendorPlant": { "type": "string" },
+        "transporterId": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "agentId": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "transporterRate": { "type": "number" },
+        "loadedWeight": { "type": "number" },
+        "receivedWeight": { "type": "number" },
+        "status": { "type": "string" },
+        "driverName": { "type": "string" },
+        "driverPhone": { "type": "string" },
+        "remarks": { "type": "string" },
+        "deliveryDocUrl": { "type": "string" },
+        "deliveryDocName": { "type": "string" },
+        "invoiceNo": { "type": "string" },
+        "invoiceDate": { "type": "string" },
+        "invoiceReceived": { "type": "boolean" },
+        "invoiceType": { "type": "string" },
+        "invoiceDigitallySigned": { "type": "boolean" },
+        "invoiceHardCopyReceived": { "type": "boolean" },
+        "invoiceDocUrl": { "type": "string" },
+        "invoiceDocName": { "type": "string" },
+        "transporterPaymentId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "doNumber", "date", "poId", "vendorPlant", "transporterId", "vehicleNumber", "transporterRate", "status", "createdAt"]
+    },
+    "AppUser": {
+      "title": "AppUser",
+      "description": "System access rights user definitions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "status": { "type": "string" },
+        "rights": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role", "status", "rights", "createdAt"]
+    },
+    "AgentPayment": {
+      "title": "AgentPayment",
+      "description": "Agent payout transaction ledger",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "agentId": { "type": "string" },
+        "year": { "type": "number" },
+        "month": { "type": "string" },
+        "paymentDate": { "type": "string" },
+        "amountPaid": { "type": "number" },
+        "referenceNo": { "type": "string" },
+        "paidByCompanyId": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "agentId", "year", "month", "paymentDate", "amountPaid", "referenceNo", "paidByCompanyId", "createdAt"]
+    },
+    "TransporterPayment": {
+      "title": "TransporterPayment",
+      "description": "Transporter carrier payout transaction ledger",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transporterId": { "type": "string" },
+        "paymentDate": { "type": "string" },
+        "amountPaid": { "type": "number" },
+        "referenceNo": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "paidByCompanyId": { "type": "string" },
+        "despatchOrderIds": { "type": "array" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "transporterId", "paymentDate", "amountPaid", "referenceNo", "paymentMethod", "paidByCompanyId", "despatchOrderIds", "createdAt"]
+    }
+  },
+  "firestore": {
+    "companies": {
+      "schema": "Company",
+      "description": "List of companies"
+    },
+    "vendors": {
+      "schema": "Vendor",
+      "description": "List of vendors"
+    },
+    "pos": {
+      "schema": "PurchaseOrder",
+      "description": "List of purchase orders"
+    },
+    "transporters": {
+      "schema": "Transporter",
+      "description": "List of carriers/transporters"
+    },
+    "agents": {
+      "schema": "Agent",
+      "description": "List of commission agents"
+    },
+    "sources": {
+      "schema": "SourceLocation",
+      "description": "List of loading source locations"
+    },
+    "dos": {
+      "schema": "DespatchOrder",
+      "description": "List of dispatch orders & transit challans"
+    },
+    "users": {
+      "schema": "AppUser",
+      "description": "List of workspace users"
+    },
+    "payments": {
+      "schema": "AgentPayment",
+      "description": "List of agent payment records"
+    },
+    "transporter_payments": {
+      "schema": "TransporterPayment",
+      "description": "List of transporter payment records"
+    }
+  }
+}
