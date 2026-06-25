@@ -23,10 +23,10 @@ allprojects {
         mavenCentral()
     }
 
-    // Force Java 17 Toolchain for all Java compilation tasks (including capacitor etc.)
+    // Force Java 21 Toolchain for all Java compilation tasks (including capacitor etc.)
     tasks.withType(JavaCompile).configureEach {
         javaCompiler = javaToolchains.compilerFor {
-            languageVersion = JavaLanguageVersion.of(17)
+            languageVersion = JavaLanguageVersion.of(21)
         }
     }
 }
