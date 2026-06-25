@@ -37,5 +37,14 @@ service cloud.firestore {
     match /transporter_payments/{id} {
       allow read, write: if true;
     }
+    match /notifications/{id} {
+      allow read, write: if true;
+    }
+    match /products/{id} {
+      allow read, write: if true;
+    }
+    match /chats/{id} {
+      allow read, write: if true;
+    }
   }
 }

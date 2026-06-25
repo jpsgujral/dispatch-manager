@@ -48,7 +48,7 @@ export default function CommissionLedger({
   onDeletePayment,
   onBack,
 }: CommissionLedgerProps) {
-  const [selectedAgentId, setSelectedAgentId] = useState<string>(agents[0]?.id || '');
+  const [selectedAgentId, setSelectedAgentId] = useState<string>('all');
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
   const [advicePayment, setAdvicePayment] = useState<AgentPayment | null>(null);
 
@@ -124,91 +124,75 @@ export default function CommissionLedger({
     };
   });
 
-  // Filter commissions for selected agent
-  const selectedAgentCommissions = calculatedCommissions.filter(c => c.agent?.id === selectedAgentId);
+  // Filter commissions for selected agent if not 'all'
+  const selectedAgentCommissions = selectedAgentId === 'all'
+    ? calculatedCommissions
+    : calculatedCommissions.filter(c => c.agent?.id === selectedAgentId);
 
-  // Grouped Vendorwise & Monthwise logic
-  // Struct: Record<vendorId, Record<monthYear, { commEntries: typeof selectedAgentCommissions, totalWeight: number, totalComm: number }>>
-  const groupings: Record<string, Record<string, {
-    vendorName: string;
-    monthYear: string;
+  // Grouped by Agent Name logic
+  const groupings: Record<string, {
+    agentId: string;
+    agentName: string;
+    agent?: Agent;
     entries: typeof selectedAgentCommissions;
     totalWeight: number;
     totalCommission: number;
-  }>> = {};
+  }> = {};
 
   selectedAgentCommissions.forEach(item => {
-    const vId = item.vendor?.id || 'unknown-vendor';
-    const vName = item.vendor?.name || 'Local Direct Deliveries';
-    const monthYear = item.monthYearKey;
+    const aId = item.agent?.id || 'direct-deliveries';
+    const aName = item.agent?.name || 'Local Direct Deliveries';
 
-    if (!groupings[vId]) {
-      groupings[vId] = {};
-    }
-
-    if (!groupings[vId][monthYear]) {
-      groupings[vId][monthYear] = {
-        vendorName: vName,
-        monthYear: monthYear,
+    if (!groupings[aId]) {
+      groupings[aId] = {
+        agentId: aId,
+        agentName: aName,
+        agent: item.agent,
         entries: [],
         totalWeight: 0,
         totalCommission: 0,
       };
     }
 
-    groupings[vId][monthYear].entries.push(item);
-    groupings[vId][monthYear].totalWeight += (item.doItem.receivedWeight || 0);
-    groupings[vId][monthYear].totalCommission += item.totalCommission;
+    groupings[aId].entries.push(item);
+    groupings[aId].totalWeight += (item.doItem.receivedWeight || 0);
+    groupings[aId].totalCommission += item.totalCommission;
   });
 
-  // Flattened grouping list for easier tabular display
-  const flattenedGroupings: {
-    vendorId: string;
-    vendorName: string;
-    monthYear: string;
-    totalWeight: number;
-    totalCommission: number;
-    entriesCount: number;
-    entries: typeof selectedAgentCommissions;
-  }[] = [];
+  const flattenedGroupings = Object.values(groupings);
 
-  Object.entries(groupings).forEach(([vId, vGroups]) => {
-    Object.entries(vGroups).forEach(([mYr, gData]) => {
-      flattenedGroupings.push({
-        vendorId: vId,
-        vendorName: gData.vendorName,
-        monthYear: mYr,
-        totalWeight: gData.totalWeight,
-        totalCommission: gData.totalCommission,
-        entriesCount: gData.entries.length,
-        entries: gData.entries,
-      });
-    });
-  });
-
-  // Total Summary stats for current agent
+  // Total Summary stats
   const totalEarned = selectedAgentCommissions.reduce((sum, item) => sum + item.totalCommission, 0);
-  const agentPayments = payments.filter(p => p.agentId === selectedAgentId);
+  const agentPayments = selectedAgentId === 'all'
+    ? payments
+    : payments.filter(p => p.agentId === selectedAgentId);
   const totalPaid = agentPayments.reduce((sum, p) => sum + p.amountPaid, 0);
-  const balanceOutstanding = Math.max(0, totalEarned - totalPaid);
+  
+  const balanceOutstanding = selectedAgentId === 'all'
+    ? Object.values(groupings).reduce((sum, group) => {
+        const paysForAgent = payments.filter(p => p.agentId === group.agentId);
+        const agentPaidAmt = paysForAgent.reduce((pSum, p) => pSum + p.amountPaid, 0);
+        return sum + Math.max(0, group.totalCommission - agentPaidAmt);
+      }, 0)
+    : Math.max(0, totalEarned - totalPaid);
 
-  const selectedAgent = agents.find(a => a.id === selectedAgentId);
+  const selectedAgent = selectedAgentId === 'all' ? undefined : agents.find(a => a.id === selectedAgentId);
 
-  const handleOpenPayoutModal = (vendName?: string, mYear?: string, suggestedAmt?: number) => {
+  const handleOpenPayoutModal = (agentId?: string, suggestedAmt?: number, customNotes?: string) => {
     if (!canManageLedger) return;
-    setPaymentAgentId(selectedAgentId);
-    if (mYear) {
-      const parts = mYear.split(' ');
-      setPaymentMonth(parts[0]);
-      if (parts[1]) setPaymentYear(Number(parts[1]));
-    }
+    setPaymentAgentId(agentId || (selectedAgentId !== 'all' ? selectedAgentId : '') || (agents[0]?.id || ''));
+    
+    const d = new Date();
+    setPaymentMonth(MONTHS[d.getMonth()]);
+    setPaymentYear(d.getFullYear());
+
     if (suggestedAmt) {
       setPaymentAmount(suggestedAmt.toFixed(2));
     } else {
       setPaymentAmount('');
     }
     setPaymentCompanyId(companies[0]?.id || '');
-    setPaymentNotes(vendName ? `Commission settlement for supplying ${vendName} site during ${mYear}.` : '');
+    setPaymentNotes(customNotes || '');
     setPaymentReference('');
     setPayoutModalOpen(true);
   };
@@ -306,17 +290,25 @@ export default function CommissionLedger({
                 {agents.length === 0 ? (
                   <option value="">No brokers registered</option>
                 ) : (
-                  agents.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))
+                  <>
+                    <option value="all">All Brokers / Agents</option>
+                    {agents.map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </>
                 )}
               </select>
             </div>
-            {selectedAgent && (
+            {selectedAgent ? (
               <div className="mt-4 border-t border-dashed border-[#D1D1CF] pt-3 text-xs leading-relaxed text-slate-500 font-medium">
                 <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-bold">Broker Contacts:</span>
                 Phone: <span className="text-neutral-800 font-semibold">{selectedAgent.contactNo || 'N/A'}</span><br />
                 Email: <span className="text-neutral-800 font-semibold">{selectedAgent.email || 'N/A'}</span>
+              </div>
+            ) : (
+              <div className="mt-4 border-t border-dashed border-[#D1D1CF] pt-3 text-xs leading-relaxed text-slate-500 font-medium">
+                <span className="block text-[9px] uppercase tracking-wider text-slate-400 font-bold">Central Overview:</span>
+                Showing consolidated ledger profiles for all {agents.length} registered brokers and direct deliveries.
               </div>
             )}
           </div>
@@ -354,11 +346,11 @@ export default function CommissionLedger({
           </div>
         </div>
 
-        {/* LEDGER ENTRIES GROUPED VENDOR & MONTHWISE */}
+        {/* LEDGER ENTRIES GROUPED BY AGENT NAME */}
         <div className="mt-8 space-y-4">
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-bold uppercase text-slate-805 tracking-wider font-serif">
-              Grouped Account Ledger (Vendor-wise & Month-wise)
+              Grouped Account Ledger (Grouped by Agent Name)
             </h3>
             <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded font-mono font-semibold">
               {flattenedGroupings.length} Active Ledger Segments
@@ -378,26 +370,26 @@ export default function CommissionLedger({
             <div className="space-y-4">
               {flattenedGroupings.map((group, gIdx) => {
                 const paysForGroup = payments.filter(
-                  p => p.agentId === selectedAgentId && p.month === group.monthYear.split(' ')[0] && p.year === Number(group.monthYear.split(' ')[1])
+                  p => p.agentId === group.agentId
                 );
                 const groupedPaidAmt = paysForGroup.reduce((sum, p) => sum + p.amountPaid, 0);
                 const groupOutstanding = Math.max(0, group.totalCommission - groupedPaidAmt);
 
                 return (
-                  <div key={`${group.vendorId}-${group.monthYear}-${gIdx}`} className="bg-white border border-[#D1D1CF] overflow-hidden">
+                  <div key={`${group.agentId}-${gIdx}`} className="bg-white border border-[#D1D1CF] overflow-hidden">
                     {/* Segment Header */}
                     <div className="bg-slate-50 border-b border-[#D1D1CF] px-4 md:px-5 py-3 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
                       <div>
                         <div className="flex items-center space-x-2">
                           <span className="text-xs font-bold text-[#E65100] px-2 py-0.5 border border-[#E65100]/30 font-mono">
-                            {group.monthYear}
+                            Broker Agent
                           </span>
                           <h4 className="text-xs font-black uppercase text-stone-900 tracking-tight">
-                            {group.vendorName}
+                            {group.agentName}
                           </h4>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 font-medium font-mono">
-                          RECORD COUNT: {group.entriesCount} Deliveries | Cumulative volume: {group.totalWeight.toFixed(2)} MT
+                          RECORD COUNT: {group.entries.length} Deliveries | Cumulative volume: {group.totalWeight.toFixed(2)} MT
                         </p>
                       </div>
 
@@ -415,13 +407,13 @@ export default function CommissionLedger({
                           <strong className="text-[#E65100] font-black">₹{Math.round(groupOutstanding).toLocaleString('en-IN')}</strong>
                         </div>
 
-                        {canManageLedger && groupOutstanding > 0 && (
+                        {canManageLedger && groupOutstanding > 0 && group.agentId !== 'direct-deliveries' && (
                           <button
                             type="button"
-                            onClick={() => handleOpenPayoutModal(group.vendorName, group.monthYear, groupOutstanding)}
+                            onClick={() => handleOpenPayoutModal(group.agentId, groupOutstanding, `Commission payout settlement for broker ${group.agentName}`)}
                             className="bg-[#1A1A1A] hover:bg-neutral-800 text-white font-sans font-bold text-[10px] uppercase tracking-wider px-2.5 py-1.5 leading-none transition-colors cursor-pointer border border-[#D1D1CF]"
                           >
-                            Payout Segment
+                            Payout Agent
                           </button>
                         )}
                       </div>
@@ -433,6 +425,7 @@ export default function CommissionLedger({
                         <thead className="bg-[#F9F8F6] text-[9px] font-bold text-slate-500 uppercase tracking-widest border-b border-[#D1D1CF] font-mono select-none">
                           <tr>
                             <th className="px-4 py-2">DO Number</th>
+                            <th className="px-4 py-2">Vendor Name</th>
                             <th className="px-4 py-2">Date</th>
                             <th className="px-4 py-2">Weighed (MT)</th>
                             <th className="px-4 py-2">Vehicle</th>
@@ -446,6 +439,7 @@ export default function CommissionLedger({
                           {group.entries.map((entry, eIdx) => (
                             <tr key={`${entry.doItem.id}-${eIdx}`} className="hover:bg-slate-50/40">
                               <td className="px-4 py-2 font-mono font-bold text-slate-900">{entry.doItem.doNumber}</td>
+                              <td className="px-4 py-2 text-xs font-semibold text-slate-700">{entry.vendor?.name || 'Local'}</td>
                               <td className="px-4 py-2 text-xs text-slate-400 font-mono">{entry.doItem.date}</td>
                               <td className="px-4 py-2 font-mono text-slate-705 font-bold">{(entry.doItem.receivedWeight || 0).toFixed(2)} MT</td>
                               <td className="px-4 py-2 font-mono text-[10px] text-slate-500">{entry.doItem.vehicleNumber}</td>

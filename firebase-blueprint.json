@@ -125,6 +125,7 @@
         "invoiceDocUrl": { "type": "string" },
         "invoiceDocName": { "type": "string" },
         "transporterPaymentId": { "type": "string" },
+        "routeComplianceLog": { "type": "array" },
         "createdAt": { "type": "string" }
       },
       "required": ["id", "doNumber", "date", "poId", "vendorPlant", "transporterId", "vehicleNumber", "transporterRate", "status", "createdAt"]
@@ -176,12 +177,96 @@
         "paidByCompanyId": { "type": "string" },
         "despatchOrderIds": { "type": "array" },
         "notes": { "type": "string" },
-        "createdAt": { "type": "string" }
+        "createdAt": { "type": "string" },
+        "freightAmount": { "type": "number" },
+        "gstRate": { "type": "number" },
+        "gstAmount": { "type": "number" },
+        "isGstCompliant": { "type": "boolean" },
+        "gstWithheld": { "type": "boolean" },
+        "gstWithheldStatus": { "type": "string" },
+        "gstReleaseDate": { "type": "string" },
+        "gstReleaseRef": { "type": "string" }
       },
       "required": ["id", "transporterId", "paymentDate", "amountPaid", "referenceNo", "paymentMethod", "paidByCompanyId", "despatchOrderIds", "createdAt"]
+    },
+    "NotificationLog": {
+      "title": "NotificationLog",
+      "description": "Notification transmission history logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "doId": { "type": "string" },
+        "doNumber": { "type": "string" },
+        "transporterId": { "type": "string" },
+        "transporterName": { "type": "string" },
+        "recipientEmail": { "type": "string" },
+        "subject": { "type": "string" },
+        "body": { "type": "string" },
+        "status": { "type": "string" },
+        "sentAt": { "type": "string" }
+      },
+      "required": ["id", "doId", "doNumber", "transporterId", "transporterName", "recipientEmail", "subject", "body", "status", "sentAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product registration catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "hsnCode": { "type": "string" },
+        "gstRate": { "type": "number" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "status", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Secure interactive messaging between terminal users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "content": { "type": "string" },
+        "fileUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "senderId", "senderName", "senderEmail", "receiverId", "content", "createdAt"]
+    },
+    "RouteComplianceLogEntry": {
+      "title": "RouteComplianceLogEntry",
+      "description": "Turnaround time and status modification transition log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fromStatus": { "type": "string" },
+        "toStatus": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "tatHours": { "type": "number" },
+        "remarks": { "type": "string" }
+      },
+      "required": ["id", "fromStatus", "toStatus", "timestamp", "updatedBy"]
     }
   },
   "firestore": {
+    "chats": {
+      "schema": "ChatMessage",
+      "description": "List of user-to-user interactive chat messages with optional attachments"
+    },
+    "products": {
+      "schema": "Product",
+      "description": "Catalog of commercial products"
+    },
     "companies": {
       "schema": "Company",
       "description": "List of companies"
@@ -221,6 +306,10 @@
     "transporter_payments": {
       "schema": "TransporterPayment",
       "description": "List of transporter payment records"
+    },
+    "notifications": {
+      "schema": "NotificationLog",
+      "description": "List of dispatch notification log documents"
     }
   }
 }

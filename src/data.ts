@@ -1,4 +1,10 @@
-import { Company, Vendor, PurchaseOrder, Transporter, Agent, DespatchOrder, AppUser, AgentPayment, TransporterPayment, SourceLocation } from './types';
+import { Company, Vendor, Product, PurchaseOrder, Transporter, Agent, DespatchOrder, AppUser, AgentPayment, TransporterPayment, SourceLocation } from './types';
+
+export const INITIAL_PRODUCTS: Product[] = [
+  { id: 'prod-1', name: 'Fly Ash', hsnCode: '382499', description: 'Premium dry Fly Ash collected from electrostatic precipitators.', category: 'Cementitious', gstRate: 18, status: 'Active', createdAt: '2026-01-01' },
+  { id: 'prod-2', name: 'GGBS', hsnCode: '261800', description: 'Ground Granulated Blast-furnace Slag compliant with IS 16714.', category: 'Cementitious', gstRate: 18, status: 'Active', createdAt: '2026-01-01' },
+  { id: 'prod-3', name: 'Micro Silica', hsnCode: '281122', description: 'High-grade densified Silica Fume (Micro Silica) for 90 Grade Concrete.', category: 'Cementitious', gstRate: 18, status: 'Active', createdAt: '2026-01-01' }
+];
 
 export const INITIAL_SOURCES: SourceLocation[] = [
   { id: 'src-1', name: 'Ropar Thermal Power Plant Stage II', pincode: '140125', createdAt: '2026-01-01' },
@@ -304,6 +310,7 @@ export const INITIAL_USERS: AppUser[] = [
       manageAdmin: true,
     },
     createdAt: '2026-01-01',
+    passcode: 'password1234',
   },
   {
     id: 'u-2',
@@ -321,6 +328,7 @@ export const INITIAL_USERS: AppUser[] = [
       manageAdmin: false,
     },
     createdAt: '2026-02-15',
+    passcode: 'password1234',
   },
   {
     id: 'u-3',
@@ -338,6 +346,7 @@ export const INITIAL_USERS: AppUser[] = [
       manageAdmin: false,
     },
     createdAt: '2026-03-10',
+    passcode: 'password1234',
   }
 ];
 

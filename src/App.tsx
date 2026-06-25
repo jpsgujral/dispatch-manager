@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Company, 
   Vendor, 
+  Product,
   PurchaseOrder, 
   Transporter, 
   Agent, 
@@ -10,11 +11,13 @@ import {
   UserRights,
   AgentPayment,
   TransporterPayment,
-  SourceLocation
+  SourceLocation,
+  RouteComplianceLogEntry
 } from './types';
 import { 
   INITIAL_COMPANIES, 
   INITIAL_VENDORS, 
+  INITIAL_PRODUCTS,
   INITIAL_TRANSPORTERS, 
   INITIAL_AGENTS, 
   INITIAL_POS, 
@@ -24,7 +27,9 @@ import {
   INITIAL_TRANSPORTER_PAYMENTS,
   INITIAL_SOURCES
 } from './data';
-import { subscribeToCollection, saveDocument, deleteDocument, resetCollectionWithSeeds } from './firebaseService';
+import { subscribeToCollection, saveDocument, deleteDocument, resetCollectionWithSeeds, fetchCollectionOnce } from './firebaseService';
+import { auth } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 
 // Component Imports
 import Dashboard from './components/Dashboard';
@@ -32,10 +37,12 @@ import CompanyMaster from './components/CompanyMaster';
 import TSGLogo from './components/TSGLogo';
 import VendorMaster from './components/VendorMaster';
 import POMaster from './components/POMaster';
+import ProductMaster from './components/ProductMaster';
 import TransporterMaster from './components/TransporterMaster';
 import AgentMaster from './components/AgentMaster';
 import DOMaster from './components/DOMaster';
 import ChallanModal from './components/ChallanModal';
+import BottomFloatingMenu from './components/BottomFloatingMenu';
 import CommissionLedger from './components/CommissionLedger';
 import UserAdminPanel from './components/UserAdminPanel';
 import TransporterPaymentPanel from './components/TransporterPaymentPanel';
@@ -43,6 +50,7 @@ import SourceMaster from './components/SourceMaster';
 import Reports from './components/Reports';
 import NotificationCenter from './components/NotificationCenter';
 import LoginScreen from './components/LoginScreen';
+import InteractiveChat from './components/InteractiveChat';
 
 // Icon Imports
 import { 
@@ -66,9 +74,36 @@ import {
   Unlock,
   DollarSign,
   TrendingUp,
-  Mail
+  Mail,
+  Home,
+  MessageCircle,
+  Sun,
+  Moon,
+  LogOut,
+  MessageSquare,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
+
+const tabDisplayNames: Record<string, string> = {
+  dashboard: 'Dashboard',
+  company: 'Company Master',
+  vendor: 'Vendor Master',
+  po: 'Purchase Orders',
+  transporter: 'Transporters',
+  agent: 'Agent Registry',
+  sources: 'Source Master',
+  dispatch: 'Transit Movements',
+  freight: 'Freight Board',
+  advances: 'Cash Advances',
+  receipts: 'POD Receipts',
+  'transporter-payments': 'Settlements',
+  reports: 'Analytics',
+  admin: 'Security Desk',
+  notifications: 'Logs & Alerts',
+  chat: 'Communications'
+};
 
 export default function App() {
   // Navigation
@@ -78,9 +113,25 @@ export default function App() {
     return localStorage.getItem('bd_is_logged_in') === 'true';
   });
 
+  // Auto/Manual Refresh configuration
+  const [isAutoRefresh, setIsAutoRefresh] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Theme support
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('tsg_theme_mode') as 'light' | 'dark') || 'light';
+  });
+
+  const toggleTheme = () => {
+    const nextTheme = themeMode === 'light' ? 'dark' : 'light';
+    setThemeMode(nextTheme);
+    localStorage.setItem('tsg_theme_mode', nextTheme);
+  };
+
   // Master State Managed in LocalStorage
   const [companies, setCompanies] = useState<Company[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [transporters, setTransporters] = useState<Transporter[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sources, setSources] = useState<SourceLocation[]>([]);
@@ -90,6 +141,8 @@ export default function App() {
   // Administrative Users State & broker payouts state
   const [users, setUsers] = useState<AppUser[]>([]);
   const [activeUser, setActiveUser] = useState<AppUser | null>(null);
+  const [isChangePinOpen, setIsChangePinOpen] = useState(false);
+  const [tempNewPin, setTempNewPin] = useState('');
   const [payments, setPayments] = useState<AgentPayment[]>([]);
   const [transporterPayments, setTransporterPayments] = useState<TransporterPayment[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -97,10 +150,46 @@ export default function App() {
   // Selected Challan Preview Overlay
   const [selectedChallanDo, setSelectedChallanDo] = useState<DespatchOrder | null>(null);
 
-  // Synchronize state with Firebase Firestore in real-time
+  // Workflow auto launch state trigger definitions
+  const [autoOpenForm, setAutoOpenForm] = useState<'do' | 'po' | 'vendor' | 'transporter' | null>(null);
+
+  // Function to manually pull everything once from the Firestore database
+  const triggerManualRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        fetchCollectionOnce<Company>('companies', setCompanies),
+        fetchCollectionOnce<Vendor>('vendors', setVendors),
+        fetchCollectionOnce<Product>('products', setProducts),
+        fetchCollectionOnce<Transporter>('transporters', setTransporters),
+        fetchCollectionOnce<Agent>('agents', setAgents),
+        fetchCollectionOnce<SourceLocation>('sources', setSources),
+        fetchCollectionOnce<PurchaseOrder>('pos', setPos),
+        fetchCollectionOnce<DespatchOrder>('dos', setDos),
+        fetchCollectionOnce<AppUser>('users', setUsers),
+        fetchCollectionOnce<AgentPayment>('payments', setPayments),
+        fetchCollectionOnce<TransporterPayment>('transporter_payments', setTransporterPayments),
+        fetchCollectionOnce<any>('notifications', setNotifications),
+      ]);
+    } catch (err) {
+      console.error("Manual refresh encountered issues:", err);
+    } finally {
+      setTimeout(() => {
+        setIsRefreshing(false);
+      }, 500);
+    }
+  };
+
+  // Synchronize state with Firebase Firestore in real-time or manually
   useEffect(() => {
+    if (!isAutoRefresh) {
+      triggerManualRefresh();
+      return;
+    }
+
     const unsubCompanies = subscribeToCollection<Company>('companies', setCompanies, INITIAL_COMPANIES);
     const unsubVendors = subscribeToCollection<Vendor>('vendors', setVendors, INITIAL_VENDORS);
+    const unsubProducts = subscribeToCollection<Product>('products', setProducts, INITIAL_PRODUCTS);
     const unsubTransporters = subscribeToCollection<Transporter>('transporters', setTransporters, INITIAL_TRANSPORTERS);
     const unsubAgents = subscribeToCollection<Agent>('agents', setAgents, INITIAL_AGENTS);
     const unsubSources = subscribeToCollection<SourceLocation>('sources', setSources, INITIAL_SOURCES);
@@ -114,6 +203,7 @@ export default function App() {
     return () => {
       unsubCompanies();
       unsubVendors();
+      unsubProducts();
       unsubTransporters();
       unsubAgents();
       unsubSources();
@@ -124,31 +214,58 @@ export default function App() {
       unsubTransporterPayments();
       unsubNotifications();
     };
+  }, [isAutoRefresh]);
+
+  // Synchronize state with Firebase Authentication in real-time
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        localStorage.setItem('bd_active_user_id', firebaseUser.uid);
+        localStorage.setItem('bd_is_logged_in', 'true');
+        setIsLoggedIn(true);
+      } else {
+        localStorage.removeItem('bd_active_user_id');
+        localStorage.removeItem('bd_is_logged_in');
+        setIsLoggedIn(false);
+        setActiveUser(null);
+      }
+    });
+    return () => unsubAuth();
   }, []);
 
   // Sync activeUser whenever users list updates from firestore
   useEffect(() => {
     if (users.length > 0) {
       const savedActiveUserId = localStorage.getItem('bd_active_user_id');
-      const found = users.find((u) => u.id === savedActiveUserId);
       const savedIsLoggedIn = localStorage.getItem('bd_is_logged_in') === 'true';
 
-      if (found && savedIsLoggedIn) {
-        if (found.status === 'Inactive') {
-          setActiveUser(null);
-          setIsLoggedIn(false);
-          localStorage.removeItem('bd_is_logged_in');
-        } else {
-          setActiveUser(found);
-          setIsLoggedIn(true);
+      if (savedActiveUserId && savedIsLoggedIn) {
+        const found = users.find((u) => u.id === savedActiveUserId);
+        if (found) {
+          if (found.status === 'Inactive') {
+            setActiveUser(null);
+            setIsLoggedIn(false);
+            localStorage.removeItem('bd_is_logged_in');
+            signOut(auth);
+          } else {
+            setActiveUser(found);
+            setIsLoggedIn(true);
+          }
         }
       } else {
         setActiveUser(null);
         setIsLoggedIn(false);
-        localStorage.removeItem('bd_is_logged_in');
       }
     }
   }, [users]);
+
+  // Cleanup autoOpenForm state when navigating away to prevent re-opening modal forms on subsequent clicks
+  useEffect(() => {
+    if (autoOpenForm === 'do' && activeTab !== 'dispatch') setAutoOpenForm(null);
+    if (autoOpenForm === 'po' && activeTab !== 'po') setAutoOpenForm(null);
+    if (autoOpenForm === 'vendor' && activeTab !== 'vendor') setAutoOpenForm(null);
+    if (autoOpenForm === 'transporter' && activeTab !== 'transporter') setAutoOpenForm(null);
+  }, [activeTab]);
 
   // Companies Actions
   const handleAddCompany = (item: Omit<Company, 'id' | 'createdAt'>) => {
@@ -242,6 +359,57 @@ export default function App() {
     deleteDocument('sources', id);
   };
 
+  const handleEditSource = (src: SourceLocation) => {
+    saveDocument('sources', src);
+  };
+
+  // Product Master Actions
+  const handleAddProduct = (name: string, hsnCode: string, description: string, category: string, gstRate: number) => {
+    const newProd: Product = {
+      id: `prod-${Date.now()}`,
+      name,
+      hsnCode,
+      gstRate,
+      description,
+      category,
+      status: 'Active',
+      createdAt: new Date().toISOString().substring(0, 10)
+    };
+    saveDocument('products', newProd);
+  };
+
+  const handleDeleteProduct = (id: string) => {
+    deleteDocument('products', id);
+  };
+
+  const handleUpdateProductStatus = (id: string, status: 'Active' | 'Inactive') => {
+    const p = products.find(prod => prod.id === id);
+    if (p) {
+      saveDocument('products', { ...p, status });
+    }
+  };
+
+  const handleEditProduct = (p: Product) => {
+    // 1. Find the old product name from the current state
+    const oldProduct = products.find(prod => prod.id === p.id);
+    const oldName = oldProduct ? oldProduct.name : '';
+
+    // 2. Save the updated product
+    saveDocument('products', p);
+
+    // 3. Keep data integrity! If name changed from oldName, cascade rename in all linked PO documents to prevent orphan items
+    if (oldName && oldName.trim().toLowerCase() !== p.name.trim().toLowerCase()) {
+      pos.forEach(po => {
+        if (po.material.trim().toLowerCase() === oldName.trim().toLowerCase()) {
+          saveDocument('pos', {
+            ...po,
+            material: p.name.trim()
+          });
+        }
+      });
+    }
+  };
+
   // Purchase Order Actions
   const handleAddPO = (item: Omit<PurchaseOrder, 'id' | 'createdAt'>) => {
     const newP: PurchaseOrder = {
@@ -258,6 +426,48 @@ export default function App() {
 
   const handleDeletePO = (id: string) => {
     deleteDocument('pos', id);
+  };
+
+  const updateRouteComplianceLog = (
+    oldDo: DespatchOrder,
+    newStatus: 'In Transit' | 'Delivered' | 'Cancelled',
+    updatedByEmail: string,
+    remarksText?: string
+  ): RouteComplianceLogEntry[] => {
+    const currentLog = oldDo.routeComplianceLog || [];
+    
+    if (oldDo.status === newStatus) {
+      return currentLog;
+    }
+    
+    let tatHours: number | undefined = undefined;
+    if (newStatus === 'Delivered') {
+      const transitStartLog = [...currentLog]
+        .reverse()
+        .find((log) => log.toStatus === 'In Transit');
+      
+      const startTimeStr = transitStartLog ? transitStartLog.timestamp : oldDo.createdAt;
+      try {
+        const startTime = new Date(startTimeStr).getTime();
+        const endTime = Date.now();
+        const diffMs = endTime - startTime;
+        tatHours = Number((diffMs / (1000 * 60 * 60)).toFixed(2));
+      } catch (e) {
+        console.error('Error calculating TAT:', e);
+      }
+    }
+
+    const newEntry: RouteComplianceLogEntry = {
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      fromStatus: oldDo.status === 'In Transit' || oldDo.status === 'Delivered' || oldDo.status === 'Cancelled' ? oldDo.status : 'Created',
+      toStatus: newStatus,
+      timestamp: new Date().toISOString(),
+      updatedBy: updatedByEmail,
+      remarks: remarksText || `Status changed from ${oldDo.status} to ${newStatus}`,
+      tatHours
+    };
+
+    return [...currentLog, newEntry];
   };
 
   // Despatch Order Actions
@@ -284,11 +494,23 @@ export default function App() {
     const paddedSeq = String(nextNum).padStart(4, '0');
     const generatedDoNumber = `${prefix}${paddedSeq}`;
 
+    const logEntries: RouteComplianceLogEntry[] = [
+      {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        fromStatus: 'Created',
+        toStatus: item.status || 'In Transit',
+        timestamp: new Date().toISOString(),
+        updatedBy: activeUser?.email || activeUser?.name || 'System',
+        remarks: 'Order prepared and placed in transit.'
+      }
+    ];
+
     const newDo: DespatchOrder = {
       ...item,
       id: `do-${Date.now()}`,
       doNumber: generatedDoNumber,
       createdAt: new Date().toISOString().substring(0, 10),
+      routeComplianceLog: logEntries,
     };
 
     saveDocument('dos', newDo);
@@ -316,7 +538,7 @@ Please ensure safety guidelines are followed during transit. For live updates or
 
 Best regards,
 Logistics Team
-Sardar Infrastructure & Minerals Ltd`;
+TSG Group`;
 
     const subjectTemplate = localStorage.getItem('cfg_notification_subject_template') || DEFAULT_SUBJECT_TEMPLATE;
     const bodyTemplate = localStorage.getItem('cfg_notification_body_template') || DEFAULT_BODY_TEMPLATE;
@@ -385,13 +607,17 @@ Sardar Infrastructure & Minerals Ltd`;
   ) => {
     const item = dos.find(d => d.id === id);
     if (item) {
+      const targetStatus = status || 'Delivered';
+      const email = activeUser?.email || activeUser?.name || 'System';
+      const updatedLog = updateRouteComplianceLog(item, targetStatus, email, remarks);
       const updatedDo: DespatchOrder = {
         ...item,
         receivedWeight,
         remarks: remarks !== undefined ? remarks : item.remarks,
-        status: status || 'Delivered',
+        status: targetStatus,
         deliveryDocUrl: deliveryDocUrl !== undefined ? deliveryDocUrl : item.deliveryDocUrl,
         deliveryDocName: deliveryDocName !== undefined ? deliveryDocName : item.deliveryDocName,
+        routeComplianceLog: updatedLog,
       };
       saveDocument('dos', updatedDo);
     }
@@ -400,12 +626,26 @@ Sardar Infrastructure & Minerals Ltd`;
   const handleCancelDO = (id: string) => {
     const item = dos.find(d => d.id === id);
     if (item) {
+      const email = activeUser?.email || activeUser?.name || 'System';
+      const updatedLog = updateRouteComplianceLog(item, 'Cancelled', email, 'Logistics Despatch Order cancelled by user');
       const updatedDo: DespatchOrder = {
         ...item,
         status: 'Cancelled',
+        routeComplianceLog: updatedLog,
       };
       saveDocument('dos', updatedDo);
     }
+  };
+
+  const handleEditDO = (item: DespatchOrder) => {
+    const oldItem = dos.find(d => d.id === item.id);
+    const updatedItem = { ...item };
+    if (oldItem && oldItem.status !== item.status) {
+      const email = activeUser?.email || activeUser?.name || 'System';
+      const updatedLog = updateRouteComplianceLog(oldItem, item.status, email, item.remarks);
+      updatedItem.routeComplianceLog = updatedLog;
+    }
+    saveDocument('dos', updatedItem);
   };
 
   // Simulated Login Selector
@@ -427,35 +667,30 @@ Sardar Infrastructure & Minerals Ltd`;
   };
 
   const handleLogout = () => {
+    signOut(auth).catch(err => console.error('Signout error:', err));
     setIsLoggedIn(false);
+    localStorage.removeItem('bd_active_user_id');
     localStorage.removeItem('bd_is_logged_in');
     setActiveUser(null);
   };
 
-  const handleRegisterUser = (name: string, email: string, role: 'Admin' | 'Executive' | 'Viewer') => {
-    const defaultRights: UserRights = {
-      manageCompanies: role === 'Admin' || role === 'Executive',
-      manageVendors: role === 'Admin' || role === 'Executive',
-      managePOs: role === 'Admin' || role === 'Executive',
-      manageTransporters: role === 'Admin' || role === 'Executive',
-      manageDespatches: role === 'Admin' || role === 'Executive',
-      manageLedger: role === 'Admin',
-      manageAdmin: role === 'Admin',
-    };
-    const newUser: AppUser = {
-      id: `u-${Date.now()}`,
-      name,
-      email,
-      role,
-      status: 'Active',
-      rights: defaultRights,
-      createdAt: new Date().toISOString().substring(0, 10),
-    };
+  const handleRegisterUser = (newUser: AppUser) => {
     saveDocument('users', newUser);
     setActiveUser(newUser);
     setIsLoggedIn(true);
     localStorage.setItem('bd_active_user_id', newUser.id);
     localStorage.setItem('bd_is_logged_in', 'true');
+  };
+
+  const handleChangePasscode = (newPin: string) => {
+    if (activeUser) {
+      const updated: AppUser = {
+        ...activeUser,
+        passcode: newPin.trim(),
+      };
+      saveDocument('users', updated);
+      setActiveUser(updated);
+    }
   };
 
   // Add User
@@ -474,6 +709,14 @@ Sardar Infrastructure & Minerals Ltd`;
     if (u) {
       const uCopy = { ...u, rights: targetRights };
       saveDocument('users', uCopy);
+    }
+  };
+
+  // Update User fully (profile & rights)
+  const handleUpdateUser = (updatedUser: AppUser) => {
+    saveDocument('users', updatedUser);
+    if (activeUser && activeUser.id === updatedUser.id) {
+      setActiveUser(updatedUser);
     }
   };
 
@@ -544,6 +787,10 @@ Sardar Infrastructure & Minerals Ltd`;
     deleteDocument('transporter_payments', paymentId);
   };
 
+  const handleUpdateTransporterPayment = (payment: TransporterPayment) => {
+    saveDocument('transporter_payments', payment);
+  };
+
   const handleUpdateInvoiceDetails = (doId: string, invoiceData: {
     invoiceNo: string;
     invoiceDate: string;
@@ -581,6 +828,7 @@ Sardar Infrastructure & Minerals Ltd`;
         await Promise.all([
           resetCollectionWithSeeds('companies', INITIAL_COMPANIES),
           resetCollectionWithSeeds('vendors', INITIAL_VENDORS),
+          resetCollectionWithSeeds('products', INITIAL_PRODUCTS),
           resetCollectionWithSeeds('transporters', INITIAL_TRANSPORTERS),
           resetCollectionWithSeeds('agents', INITIAL_AGENTS),
           resetCollectionWithSeeds('sources', INITIAL_SOURCES),
@@ -609,6 +857,7 @@ Sardar Infrastructure & Minerals Ltd`;
     const databaseBackup = {
       companies,
       vendors,
+      products,
       transporters,
       agents,
       pos,
@@ -643,6 +892,7 @@ Sardar Infrastructure & Minerals Ltd`;
           // Sync all imported items to Firestore
           parsed.companies.forEach((x: any) => saveDocument('companies', x));
           parsed.vendors.forEach((x: any) => saveDocument('vendors', x));
+          (parsed.products || []).forEach((x: any) => saveDocument('products', x));
           (parsed.transporters || []).forEach((x: any) => saveDocument('transporters', x));
           (parsed.agents || []).forEach((x: any) => saveDocument('agents', x));
           (parsed.sources || []).forEach((x: any) => saveDocument('sources', x));
@@ -671,6 +921,7 @@ Sardar Infrastructure & Minerals Ltd`;
       case 'company': return !activeUser.rights?.manageCompanies;
       case 'vendor': return !activeUser.rights?.manageVendors;
       case 'po': return !activeUser.rights?.managePOs;
+      case 'product': return !activeUser.rights?.managePOs;
       case 'transporter': return !activeUser.rights?.manageTransporters;
       case 'agent': return !activeUser.rights?.manageVendors;
       case 'sources': return !activeUser.rights?.manageVendors;
@@ -681,6 +932,23 @@ Sardar Infrastructure & Minerals Ltd`;
       case 'reports': return !activeUser.rights?.manageLedger;
       case 'admin': return !activeUser.rights?.manageAdmin;
       default: return false;
+    }
+  };
+
+  const handleTriggerQuickAction = (action: 'do' | 'po' | 'vendor' | 'transporter') => {
+    setIsMobileMenuOpen(false);
+    if (action === 'do') {
+      setActiveTab('dispatch');
+      setAutoOpenForm('do');
+    } else if (action === 'po') {
+      setActiveTab('po');
+      setAutoOpenForm('po');
+    } else if (action === 'vendor') {
+      setActiveTab('vendor');
+      setAutoOpenForm('vendor');
+    } else if (action === 'transporter') {
+      setActiveTab('transporter');
+      setAutoOpenForm('transporter');
     }
   };
 
@@ -750,14 +1018,14 @@ Sardar Infrastructure & Minerals Ltd`;
         return (
           <Dashboard 
             companies={companies}
-            vendors={vendors}
-            transporters={transporters}
-            agents={agents}
-            pos={pos}
             dos={dos}
-            onNavigate={(tab) => setActiveTab(tab)}
-            onSelectChallan={(item) => setSelectedChallanDo(item)}
-            onUpdateReceivedWeight={handleUpdateReceivedWeight}
+            transporters={transporters}
+            currentUser={activeUser}
+            themeMode={themeMode}
+            onToggleTheme={toggleTheme}
+            onLogout={handleLogout}
+            onToggleSidebar={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            onTriggerQuickAction={handleTriggerQuickAction}
           />
         );
       case 'company':
@@ -781,6 +1049,7 @@ Sardar Infrastructure & Minerals Ltd`;
             onEditVendor={handleEditVendor}
             onDeleteVendor={handleDeleteVendor}
             onBack={() => setActiveTab('dashboard')}
+            autoOpenForm={autoOpenForm === 'vendor'}
           />,
           'Vendor Master'
         );
@@ -791,11 +1060,13 @@ Sardar Infrastructure & Minerals Ltd`;
             pos={pos}
             companies={companies}
             vendors={vendors}
+            products={products}
             dos={dos}
             onAddPO={handleAddPO}
             onEditPO={handleEditPO}
             onDeletePO={handleDeletePO}
             onBack={() => setActiveTab('dashboard')}
+            autoOpenForm={autoOpenForm === 'po'}
           />,
           'PO Contracts Master'
         );
@@ -809,6 +1080,7 @@ Sardar Infrastructure & Minerals Ltd`;
             onEditTransporter={handleEditTransporter}
             onDeleteTransporter={handleDeleteTransporter}
             onBack={() => setActiveTab('dashboard')}
+            autoOpenForm={autoOpenForm === 'transporter'}
           />,
           'Transporter Master'
         );
@@ -824,6 +1096,20 @@ Sardar Infrastructure & Minerals Ltd`;
           />,
           'Agent Master'
         );
+      case 'product':
+        return secureAction(
+          'managePOs',
+          <ProductMaster
+            products={products}
+            onAddProduct={handleAddProduct}
+            onEditProduct={handleEditProduct}
+            onDeleteProduct={handleDeleteProduct}
+            onUpdateProductStatus={handleUpdateProductStatus}
+            pos={pos}
+            onBack={() => setActiveTab('dashboard')}
+          />,
+          'Product Catalog Master'
+        );
       case 'dispatch':
         return secureAction(
           'manageDespatches',
@@ -832,15 +1118,18 @@ Sardar Infrastructure & Minerals Ltd`;
             pos={pos}
             companies={companies}
             vendors={vendors}
+            products={products}
             transporters={transporters}
             agents={agents}
             sources={sources}
             onAddSource={handleAddSource}
             onAddDO={handleAddDO}
+            onEditDO={handleEditDO}
             onUpdateReceivedWeight={handleUpdateReceivedWeight}
             onCancelDO={handleCancelDO}
             onSelectChallan={(item) => setSelectedChallanDo(item)}
             onBack={() => setActiveTab('dashboard')}
+            autoOpenForm={autoOpenForm === 'do'}
           />,
           'Dispatch Movements'
         );
@@ -851,6 +1140,7 @@ Sardar Infrastructure & Minerals Ltd`;
             sources={sources}
             dos={dos}
             onAddSource={handleAddSource}
+            onEditSource={handleEditSource}
             onDeleteSource={handleDeleteSource}
             onBack={() => setActiveTab('dashboard')}
           />,
@@ -900,6 +1190,7 @@ Sardar Infrastructure & Minerals Ltd`;
             currentUser={activeUser}
             onAddPayment={handleAddTransporterPayment}
             onDeletePayment={handleDeleteTransporterPayment}
+            onUpdatePayment={handleUpdateTransporterPayment}
             onUpdateInvoiceDetails={handleUpdateInvoiceDetails}
             onUpdateHardCopyStatus={handleUpdateHardCopyStatus}
             onBack={() => setActiveTab('dashboard')}
@@ -931,9 +1222,19 @@ Sardar Infrastructure & Minerals Ltd`;
             onUpdateUserRights={handleUpdateUserRights}
             onToggleUserStatus={handleToggleUserStatus}
             onDeleteUser={handleDeleteUser}
+            onUpdateUser={handleUpdateUser}
             onBack={() => setActiveTab('dashboard')}
           />,
           'Administrative Security Settings'
+        );
+      case 'chat':
+        return (
+          <InteractiveChat 
+            activeUser={activeUser}
+            users={users}
+            onBack={() => setActiveTab('dashboard')}
+            themeMode={themeMode}
+          />
         );
       default:
         return <div>Tab not loaded</div>;
@@ -964,102 +1265,167 @@ Sardar Infrastructure & Minerals Ltd`;
     );
   }
 
+  const isDashboardMode = activeTab === 'dashboard';
+
   return (
-    <div className="min-h-screen bg-[#F9F8F6] flex flex-col font-sans text-[#1A1A1A]">
+    <div className={`min-h-screen w-full max-w-full overflow-x-hidden flex flex-col font-sans transition-colors duration-300 ${
+      themeMode === 'dark' ? 'bg-[#0b0c10] text-[#E0E6ED]' : 'bg-[#EBF3FC] text-[#1A1A1A]'
+    }`}>
       
       {/* Top Professional Admin Bar */}
-      <header className="bg-white border-b border-[#D1D1CF] sticky top-0 z-30 shadow-xs px-4 md:px-8 py-3 shrink-0">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4">
-          
-          <div className="flex justify-between items-center w-full md:w-auto">
-            <div className="flex items-center space-x-3">
-              <TSGLogo size={42} className="border-2 border-black shadow-xs shrink-0" />
-              <div>
-                <div className="flex items-center space-x-1.5 flex-wrap">
-                  <h1 className="text-sm sm:text-base md:text-lg font-serif font-bold italic tracking-tight text-neutral-900 leading-tight">
-                    {companies[0]?.name || 'Sardar Infrastructure & Minerals Ltd'}
-                  </h1>
-                  <span className="text-[8px] bg-[#F4F4F1] text-black px-1.5 py-0.5 font-bold border border-[#D1D1CF]">
-                    v4.0
-                  </span>
-                </div>
-                <p className="text-[10px] text-[#E65100] uppercase tracking-[0.2em] font-bold mt-0.5">
-                  The Fly Ash People
-                </p>
+      <div className="fixed top-0 left-0 right-0 z-30 w-full shrink-0 px-4 py-3 bg-[#EBF3FC]/90 dark:bg-[#0b0c10]/95 backdrop-blur-md border-b border-[#D1D1CF]/40 dark:border-white/5 shadow-xs">
+        <div className="w-full max-w-4xl mx-auto">
+          <div className="relative flex items-center justify-between px-2 sm:px-4 py-2 bg-gradient-to-r from-[#031E51] via-[#051130] to-[#041D4C] text-slate-300 shadow-[0_12px_28px_rgba(3,30,81,0.35)] border border-white/10 backdrop-blur-md rounded-[32px]">
+            {/* Shine gloss highlight overlay */}
+            <div className="absolute inset-0 rounded-[32px] bg-gradient-to-b from-white/12 to-transparent pointer-events-none h-1/2" />
+            
+            {/* Left Controls Group */}
+            <div className="flex items-center space-x-1 sm:space-x-1.5 relative z-10 min-w-0">
+              {/* Menu trigger button */}
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 hover:text-white transition-all cursor-pointer border border-white/5 active:scale-95 shrink-0"
+                title="Open Navigation Menu"
+              >
+                <Menu className="h-4.5 w-4.5 text-white" />
+              </button>
+
+              {/* Home utility action */}
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className={`hidden min-[420px]:flex h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/25 hover:text-white transition-all cursor-pointer border border-white/5 active:scale-95 shrink-0 ${themeMode === 'dark' ? 'text-amber-400' : 'text-slate-200'}`}
+                title="Go to Dashboard"
+              >
+                <Home className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+              </button>
+
+              {/* Active Module badge indicator (Speedometer / Gauge removed as requested) */}
+              <div className="flex items-center px-2.5 py-1 sm:py-1.5 bg-white/15 border border-white/5 rounded-full shadow-inner min-w-0 shrink-0 select-none">
+                <span className="text-[8px] sm:text-[9px] md:text-xs font-sans font-black tracking-wider uppercase text-white leading-none truncate col-span-1">
+                  {tabDisplayNames[activeTab] || activeTab}
+                </span>
               </div>
             </div>
 
-            {/* Mobile Burger Menu Button */}
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden p-2.5 border border-black bg-white text-black hover:bg-neutral-100 transition-colors cursor-pointer shrink-0"
-              title="Toggle Menu"
-            >
-              {isMobileMenuOpen ? <X className="h-4.5 w-4.5" /> : <Menu className="h-4.5 w-4.5" />}
-            </button>
+            {/* Right Controls Group */}
+            <div className="flex items-center space-x-1 sm:space-x-1.5 relative z-10 shrink-0">
+              {/* Dynamic AUTO/MANUAL Refresh Control Cluster */}
+              <div className="flex items-center space-x-1.5 p-1 bg-white/5 border border-white/10 rounded-full shrink-0 select-none">
+                {/* Auto Sync Toggle Button */}
+                <button
+                  onClick={() => setIsAutoRefresh(!isAutoRefresh)}
+                  className={`h-7 px-2 sm:px-2.5 rounded-full flex items-center space-x-1 transition-all cursor-pointer text-[10px] uppercase font-mono font-bold ${
+                    isAutoRefresh 
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  }`}
+                  title={isAutoRefresh ? "Auto Sync is LIVE (Click to switch to Manual Sync Mode)" : "Manual Sync Mode (Click to enable real-time Auto Sync)"}
+                >
+                  {isAutoRefresh ? (
+                    <>
+                      <Wifi className="h-2.5 w-2.5 shrink-0" />
+                      <span className="hidden min-[360px]:inline">Auto</span>
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="h-2.5 w-2.5 text-amber-300 shrink-0" />
+                      <span className="hidden min-[360px]:inline">Manual</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Manual Trigger Trigger Refresh Icon */}
+                <button
+                  onClick={triggerManualRefresh}
+                  disabled={isRefreshing}
+                  className={`h-7 w-7 flex items-center justify-center rounded-full transition-all cursor-pointer active:scale-95 text-slate-200 border border-white/5 ${
+                    isRefreshing ? 'bg-indigo-600/30 text-indigo-200' : 'bg-white/10 hover:bg-white/25 hover:text-white'
+                  }`}
+                  title="Force DB Sync & Refresh"
+                >
+                  <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {/* Interactive Team Chat Board shortcut */}
+              <button
+                id="interactive-chat-shortcut-btn"
+                onClick={() => setActiveTab('chat')}
+                className={`flex h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 items-center justify-center rounded-full bg-orange-500/15 hover:bg-orange-500/35 text-orange-350 hover:text-orange-200 transition-all cursor-pointer border border-[#E65100]/30 active:scale-95`}
+                title="Secure Terminal Interactive Messaging"
+              >
+                <MessageSquare className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+              </button>
+
+              {/* Chat button - redirects to notification center log */}
+              <button
+                onClick={() => setActiveTab('notifications')}
+                className={`hidden min-[480px]:flex h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 items-center justify-center rounded-full bg-white/10 hover:bg-white/25 hover:text-white text-slate-200 transition-all cursor-pointer border border-white/5 active:scale-95`}
+                title="Notifications Center"
+              >
+                <MessageCircle className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
+              </button>
+
+              {/* Moon/Sun Toggle */}
+              <button
+                onClick={toggleTheme}
+                className="h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 hover:text-white text-slate-350 transition-all cursor-pointer border border-white/5 active:scale-95"
+                title={themeMode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                {themeMode === 'dark' ? (
+                  <Sun className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-amber-400 fill-amber-400/20" />
+                ) : (
+                  <Moon className="h-4 w-4 sm:h-[18px] sm:w-[18px] text-[#90CAF9]" />
+                )}
+              </button>
+
+              {/* Logout Action */}
+              <button
+                onClick={handleLogout}
+                className="h-8 w-8 sm:h-9 sm:w-9 md:h-10 md:w-10 flex items-center justify-center rounded-full bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/20 hover:text-rose-200 transition-all cursor-pointer active:scale-95"
+                title="Disconnect Session"
+              >
+                <LogOut className="h-4 w-4 sm:h-[16px] sm:w-[16px]" />
+              </button>
+            </div>
           </div>
 
-          {/* Backup Database Management Sync controls - Desktop hidden on mobile to avoid layout crowding */}
-          <div className="hidden md:flex flex-wrap items-center gap-2">
-            <button
-              onClick={handleExportBackup}
-              className="inline-flex items-center space-x-1 px-4 py-2 border border-black font-serif italic text-xs hover:bg-[#1A1A1A] hover:text-white transition-colors cursor-pointer"
-              title="Download full database as local JSON backup"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span>Export DB</span>
-            </button>
-
-            <label className="inline-flex items-center space-x-1 px-4 py-2 border border-black font-serif italic text-xs hover:bg-[#1A1A1A] hover:text-white transition-colors cursor-pointer">
-              <Upload className="h-3.5 w-3.5" />
-              <span>Import DB</span>
-              <input 
-                type="file" 
-                accept=".json"
-                onChange={handleImportBackup}
-                className="hidden" 
-              />
-            </label>
-
-            <button
-              onClick={handleResetToSeeds}
-              className="inline-flex items-center space-x-1 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 font-serif italic text-xs transition-colors cursor-pointer border border-red-200"
-              title="Wipe database and reset to clean industry demo seeds"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              <span>Reset Demo</span>
-            </button>
+          {/* Global Centered Subtitle - Exactly matching user screenshot */}
+          <div className={`mt-2 text-center text-[9px] uppercase font-mono tracking-[0.25em] font-extrabold ${
+            themeMode === 'dark' ? 'text-slate-400' : 'text-[#888884]'
+          }`}>
+            TSG LOGISTICS SYSTEMS v4.0
           </div>
-
         </div>
-      </header>
+      </div>
 
       {/* Main Grid Workspace split into navigation left, active panel right */}
-      <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col md:flex-row gap-6 p-4 md:p-8">
+      <div className={isDashboardMode 
+        ? "w-full flex-1 flex flex-col relative pb-32 sm:pb-36 md:pb-8 mt-[104px]"
+        : "max-w-7xl mx-auto w-full flex-1 flex flex-col p-4 md:p-8 relative pb-32 sm:pb-36 md:pb-8 mt-[104px] min-w-0"
+      }>
         
-        {/* Grey Backdrop Overlay when open on mobile */}
+        {/* Grey Backdrop Overlay when open */}
         {isMobileMenuOpen && (
           <div 
-            className="fixed inset-0 bg-black/60 z-40 md:hidden"
+            className="fixed inset-0 bg-black/60 z-40"
             onClick={() => setIsMobileMenuOpen(false)}
           />
         )}
 
-        {/* Navigation Sidebar panel / Slide-out drawer on mobile */}
+        {/* Navigation Sidebar panel / Slide-out drawer */}
         <aside 
-          className={`fixed md:relative top-0 left-0 h-full md:h-auto w-72 md:w-64 bg-[#F9F8F6] md:bg-transparent z-50 md:z-auto transition-transform duration-300 transform md:transform-none flex flex-col gap-4 p-5 md:p-0 border-r md:border-r-0 border-[#D1D1CF] md:border-none shadow-2xl md:shadow-none overflow-y-auto shrink-0 ${
-            isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-          }`}
+          className={`fixed top-0 left-0 h-full w-72 ${themeMode === 'dark' ? 'bg-[#12141a] border-slate-800 text-slate-100' : 'bg-[#EBF3FC] border-[#D1D1CF] text-[#1A1A1A]'} z-50 flex flex-col gap-4 p-5 border-r shadow-2xl overflow-y-auto shrink-0 transition-all duration-300 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}
         >
-          {/* Mobile Sidebar Brand Header */}
-          <div className="flex md:hidden items-center justify-between pb-3 border-b border-[#D1D1CF] mb-2">
+          {/* Mobile/Dashboard Sidebar Brand Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-[#D1D1CF] mb-2 shrink-0">
             <div className="flex items-center space-x-2.5">
               <TSGLogo size={32} />
               <span className="font-serif font-bold italic text-xs tracking-wider text-[#E65100]">TSG NAVIGATION</span>
             </div>
             <button
               onClick={() => setIsMobileMenuOpen(false)}
-              className="p-1 px-2 border border-black text-[10px] font-mono tracking-tighter uppercase bg-white cursor-pointer"
+              className="p-1 px-2 border-2 border-black text-[10px] font-mono tracking-tighter uppercase bg-white cursor-pointer hover:bg-neutral-100 transition-colors"
             >
               Close [X]
             </button>
@@ -1080,10 +1446,18 @@ Sardar Infrastructure & Minerals Ltd`;
               </div>
               <div className="flex items-center justify-between text-[8px] font-mono border-t border-neutral-800 pt-1.5 mt-1.5 leading-none">
                 <span className="text-[#E65100] font-black uppercase">{activeUser.role} clearance</span>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5">
+                  <button 
+                    onClick={() => { setIsChangePinOpen(true); setIsMobileMenuOpen(false); }} 
+                    className="hover:text-white text-amber-500 transition-all cursor-pointer font-bold bg-transparent border-none p-0 whitespace-nowrap"
+                    title="Change secure passcode PIN"
+                  >
+                    Change PIN
+                  </button>
+                  <span className="text-zinc-600">|</span>
                   <button 
                     onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }} 
-                    className="hover:text-white text-zinc-400 underline transition-all cursor-pointer font-bold bg-transparent border-none p-0"
+                    className="hover:text-white text-zinc-400 underline transition-all cursor-pointer font-bold bg-transparent border-none p-0 whitespace-nowrap"
                     title="Open security settings matrix"
                   >
                     Rights Desk
@@ -1091,7 +1465,7 @@ Sardar Infrastructure & Minerals Ltd`;
                   <span className="text-zinc-600">|</span>
                   <button 
                     onClick={handleLogout} 
-                    className="hover:text-rose-400 text-rose-500 transition-all cursor-pointer font-bold bg-transparent border-none p-0"
+                    className="hover:text-rose-400 text-rose-500 transition-all cursor-pointer font-bold bg-transparent border-none p-0 whitespace-nowrap"
                     title="Terminate active session"
                   >
                     Logout
@@ -1159,6 +1533,24 @@ Sardar Infrastructure & Minerals Ltd`;
                     {isTabLocked('vendor') && <Lock className="h-3 w-3 text-[#E65100]/80 inline shrink-0" />}
                   </div>
                   <ChevronRight className={`h-3 w-3 ${activeTab === 'vendor' ? 'text-[#E65100]' : 'opacity-0'}`} />
+                </button>
+
+                {/* Menu: Product Master */}
+                <button
+                  id="tab-product-btn"
+                  onClick={() => { setActiveTab('product'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between py-2 text-left transition-colors cursor-pointer ${
+                    activeTab === 'product'
+                      ? 'text-[#E65100] font-bold underline underline-offset-8 decoration-2'
+                      : 'text-[#1A1A1A] hover:text-[#E65100]'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <Layers className={`h-4 w-4 shrink-0 inline ${isTabLocked('product') ? 'text-zinc-455' : 'opacity-70'}`} />
+                    <span className={isTabLocked('product') ? 'text-zinc-400 font-normal line-through decoration-stone-300' : ''}>Product Master</span>
+                    {isTabLocked('product') && <Lock className="h-3 w-3 text-[#E65100]/80 inline shrink-0" />}
+                  </div>
+                  <ChevronRight className={`h-3 w-3 ${activeTab === 'product' ? 'text-[#E65100]' : 'opacity-0'}`} />
                 </button>
 
                 {/* Menu: Purchase Orders */}
@@ -1288,6 +1680,23 @@ Sardar Infrastructure & Minerals Ltd`;
                     )}
                     <ChevronRight className="h-3 w-3 text-[#E65100]" />
                   </div>
+                </button>
+
+                {/* Menu: Communications Hub */}
+                <button
+                  id="tab-chat-btn"
+                  onClick={() => { setActiveTab('chat'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between py-2.5 text-left transition-colors cursor-pointer ${
+                    activeTab === 'chat'
+                      ? 'text-[#E65100] font-bold underline underline-offset-8 decoration-2'
+                      : 'text-neutral-700 hover:text-[#E65100]'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <MessageSquare className="h-4 w-4 shrink-0 inline text-[#E65100]" />
+                    <span>Communications Hub</span>
+                  </div>
+                  <ChevronRight className="h-3 w-3 text-[#E65100]" />
                 </button>
 
                 {/* Menu: Ledger */}
@@ -1441,7 +1850,10 @@ Sardar Infrastructure & Minerals Ltd`;
         </aside>
 
         {/* Dynamic Context Working Canvas */}
-        <main className="flex-1 bg-white rounded-none border border-[#D1D1CF] p-6 md:p-10 min-h-[500px]">
+        <main className={isDashboardMode
+          ? "flex-1 relative w-full h-full min-h-screen"
+          : "flex-1 min-w-0 bg-white rounded-none border border-[#D1D1CF] p-6 md:p-10 min-h-[500px]"
+        }>
           {renderTabContent()}
         </main>
 
@@ -1457,16 +1869,115 @@ Sardar Infrastructure & Minerals Ltd`;
           transporter={correlations.transporter}
           agent={correlations.agent}
           sources={sources}
+          products={products}
+          vendorsList={vendors}
+          transportersList={transporters}
+          agentsList={agents}
           onClose={() => setSelectedChallanDo(null)}
         />
       )}
 
-      {/* System Legal Corporate Footer */}
-      <footer className="bg-white border-t border-[#D1D1CF] py-4 text-center text-[10px] text-[#888884] uppercase tracking-widest shrink-0 font-sans">
-        <div className="max-w-7xl mx-auto px-4 text-center">
-          <span>&copy; 2026 TSG Impex India Pvt Ltd. Approved fly ash & cements transport systems.</span>
+      {/* Change Passcode PIN Modal */}
+      {isChangePinOpen && activeUser && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-55">
+          <div className="bg-white rounded-none border-2 border-black shadow-xl w-full max-w-sm overflow-hidden text-[#1A1A1A]">
+            <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+              <h3 className="font-serif font-bold italic text-slate-805 text-sm">
+                Update Secure Terminal PIN Key
+              </h3>
+              <button
+                type="button"
+                className="text-slate-400 hover:text-black font-mono text-xs uppercase cursor-pointer"
+                onClick={() => {
+                  setIsChangePinOpen(false);
+                  setTempNewPin('');
+                }}
+              >
+                Close [X]
+              </button>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const pin = tempNewPin.trim();
+              if (pin.length < 4) {
+                alert('For security, passcode PIN must be at least 4 characters long.');
+                return;
+              }
+              handleChangePasscode(pin);
+              setIsChangePinOpen(false);
+              setTempNewPin('');
+              alert('Passcode PIN changed successfully! You can now use this passcode PIN to log in on your compiled APK.');
+            }} className="p-6 space-y-4">
+              <div>
+                <span className="block text-[10px] text-zinc-400 font-mono tracking-wider uppercase mb-1">
+                  Logged In Terminal User
+                </span>
+                <p className="text-xs font-bold text-stone-900 font-sans">
+                  {activeUser.name} ({activeUser.email})
+                </p>
+                <p className="text-[10px] text-zinc-500 italic font-serif mt-1">
+                  Current PIN key in central ledger: <code className="font-mono font-black text-[#E65100] bg-stone-50 px-1 border border-stone-200">{activeUser.passcode || 'password1234'}</code>
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                  Configure New PIN Passcode <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter custom passcode PIN"
+                  value={tempNewPin}
+                  onChange={(e) => setTempNewPin(e.target.value)}
+                  className="w-full text-xs px-3.5 py-2 border border-slate-200 focus:outline-hidden font-mono text-stone-900 font-bold bg-[#F9F8F6]"
+                  required
+                />
+                <span className="block text-[9px] text-slate-400 mt-1.5 italic leading-relaxed">
+                  Avoid simple configurations. Use a phrase, code, or private token that only you know.
+                </span>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-end space-x-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsChangePinOpen(false);
+                    setTempNewPin('');
+                  }}
+                  className="px-4 py-2 border border-[#D1D1CF] text-xs font-serif italic cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-[#E65100] hover:bg-black text-white text-xs uppercase tracking-wider font-bold rounded-none transition-colors cursor-pointer"
+                >
+                  Save New PIN Key
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-      </footer>
+      )}
+      
+      {/* Glossy Interactive Bottom Navigation Menu representation */}
+      {activeUser && (
+        <div className="md:hidden">
+          <BottomFloatingMenu 
+            onTriggerQuickAction={handleTriggerQuickAction}
+          />
+        </div>
+      )}
+
+      {/* System Legal Corporate Footer */}
+      {!isDashboardMode && (
+        <footer className="bg-white border-t border-[#D1D1CF] py-4 text-center text-[10px] text-[#888884] uppercase tracking-widest shrink-0 font-sans">
+          <div className="max-w-7xl mx-auto px-4 text-center">
+            <span>&copy; 2026 TSG Impex India Pvt Ltd. Approved fly ash & cements transport systems.</span>
+          </div>
+        </footer>
+      )}
 
     </div>
   );

@@ -190,9 +190,9 @@ export default function CompanyMaster({
 
       {/* Write/Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-neutral-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-none border border-black shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-[#D1D1CF] bg-[#F9F8F6] flex justify-between items-center">
+        <div className="fixed inset-0 bg-neutral-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-none border border-black shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-[#D1D1CF] bg-[#F9F8F6] flex justify-between items-center shrink-0">
               <h3 className="font-serif font-bold italic text-[#1A1A1A] text-base">
                 {editingCompany ? 'Edit Supplying Company' : 'Register New Supplying Company'}
               </h3>
@@ -204,7 +204,7 @@ export default function CompanyMaster({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
                 <label className="block text-[10px] font-bold text-neutral-800 uppercase tracking-wider mb-1.5">
                   Company Name <span className="text-[#E65100]">*</span>
@@ -212,7 +212,7 @@ export default function CompanyMaster({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Sardar Infrastructure & Minerals Ltd"
+                  placeholder="e.g. TSG Group"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full text-sm px-3.5 py-2 border border-[#D1D1CF] rounded-none focus:outline-hidden focus:border-black bg-[#F9F8F6]"
@@ -262,14 +262,14 @@ export default function CompanyMaster({
                 <label className="block text-[10px] font-bold text-neutral-800 uppercase tracking-wider mb-1.5">Email Coordinates</label>
                 <input
                   type="email"
-                  placeholder="e.g. ops@sardarcompany.com"
+                  placeholder="e.g. support@tsgimpex.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full text-sm px-3.5 py-2 border border-[#D1D1CF] rounded-none focus:outline-hidden focus:border-black bg-[#F9F8F6]"
                 />
               </div>
 
-              <div className="pt-5 flex justify-end space-x-3 border-t border-[#D1D1CF]">
+              <div className="pt-5 flex justify-end space-x-3 border-t border-[#D1D1CF] shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

@@ -1,4 +1,15 @@
-export type MaterialType = 'Fly Ash' | 'GGBS' | 'Micro Silica';
+export type MaterialType = string;
+
+export interface Product {
+  id: string;
+  name: string;
+  hsnCode?: string;
+  description?: string;
+  category?: string;
+  gstRate?: number;
+  status: 'Active' | 'Inactive';
+  createdAt: string;
+}
 
 export interface Company {
   id: string;
@@ -105,20 +116,42 @@ export interface DespatchOrder {
   // Payment ID linkage
   transporterPaymentId?: string; // links to TransporterPayment once settled
   
+  routeComplianceLog?: RouteComplianceLogEntry[];
+
   createdAt: string;
+}
+
+export interface RouteComplianceLogEntry {
+  id: string;
+  fromStatus: 'In Transit' | 'Delivered' | 'Cancelled' | 'Created';
+  toStatus: 'In Transit' | 'Delivered' | 'Cancelled';
+  timestamp: string; // ISO String
+  updatedBy: string; // email/name of the user who performed the transition
+  tatHours?: number; // Calculated turnaround time in hours (if transition is to Delivered)
+  remarks?: string;
 }
 
 export interface TransporterPayment {
   id: string;
   transporterId: string;
   paymentDate: string; // YYYY-MM-DD
-  amountPaid: number;
+  amountPaid: number; // immediate amount paid (will be freightAmount if GST is held, or freightAmount + gstAmount if GST is paid)
   referenceNo: string;
   paymentMethod: string; // e.g., "NEFT", "RTGS", "Bank Transfer", "Cheque"
   paidByCompanyId: string; // linked billing company
   despatchOrderIds: string[]; // paid for multiple invoices/deliveries at once
   notes?: string;
   createdAt: string;
+
+  // New Transporter GST Compliance & Withholding fields
+  freightAmount?: number; // Aggregate raw freight charges (weight * rate)
+  gstRate?: number; // Applied GST rate percentage (e.g. 5, 12, 18, or 0)
+  gstAmount?: number; // Calculated GST amount
+  isGstCompliant?: boolean; // Is carrier currently compliant with GST Department?
+  gstWithheld?: boolean; // Has GST been held back due to compliance?
+  gstWithheldStatus?: 'Withheld' | 'Released'; // Ledger status
+  gstReleaseDate?: string; // Date withheld GST is released to carrier
+  gstReleaseRef?: string; // UTR or check ref for released GST portion
 }
 
 export interface UserRights {
@@ -139,6 +172,7 @@ export interface AppUser {
   status: 'Active' | 'Inactive';
   rights: UserRights;
   createdAt: string;
+  passcode?: string;
 }
 
 export interface AgentPayment {

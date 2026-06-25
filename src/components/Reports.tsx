@@ -52,6 +52,9 @@ export default function Reports({
   // Filters
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedMonth, setSelectedMonth] = useState<number>(5); // 0-indexed, so 5 is June. June 2026 is our primary seed data month
+  
+  // Segmented view type: default to 'financial' as requested ("When we start app then financial year starts...")
+  const [reportViewType, setReportViewType] = useState<'monthly' | 'financial'>('financial');
 
   const MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June', 
@@ -60,11 +63,18 @@ export default function Reports({
 
   const YEARS = [2025, 2026, 2027];
 
-  // Helper: check if a DO is in the selected month & year
-  const isDoInSelectedMonth = (doDateStr: string) => {
+  // Helper: check if a DO is in the selected month & year or financial year
+  const isDoInSelectedPeriod = (doDateStr: string) => {
     try {
       const date = new Date(doDateStr);
-      return date.getFullYear() === selectedYear && date.getMonth() === selectedMonth;
+      if (reportViewType === 'monthly') {
+        return date.getFullYear() === selectedYear && date.getMonth() === selectedMonth;
+      } else {
+        // Financial Year is 1 April of selectedYear to 31 March of next year
+        const startDate = new Date(`${selectedYear}-04-01T00:00:00`);
+        const endDate = new Date(`${selectedYear + 1}-03-31T23:59:59`);
+        return date >= startDate && date <= endDate;
+      }
     } catch {
       return false;
     }
@@ -72,13 +82,13 @@ export default function Reports({
 
   // 1. Process active (non-cancelled) DOs for KPIs & Commodity calculations
   const monthDos = useMemo(() => {
-    return dos.filter(d => isDoInSelectedMonth(d.date) && d.status !== 'Cancelled');
-  }, [dos, selectedYear, selectedMonth]);
+    return dos.filter(d => isDoInSelectedPeriod(d.date) && d.status !== 'Cancelled');
+  }, [dos, selectedYear, selectedMonth, reportViewType]);
 
   // 2. Deliveries with commissions
   const deliveredMonthDos = useMemo(() => {
-    return dos.filter(d => isDoInSelectedMonth(d.date) && d.status === 'Delivered' && d.agentId);
-  }, [dos, selectedYear, selectedMonth]);
+    return dos.filter(d => isDoInSelectedPeriod(d.date) && d.status === 'Delivered' && d.agentId);
+  }, [dos, selectedYear, selectedMonth, reportViewType]);
 
   // 3. KPI Metrics
   const metrics = useMemo(() => {
@@ -125,69 +135,150 @@ export default function Reports({
     };
   }, [monthDos, deliveredMonthDos, pos]);
 
-  // 4. Transform data for Daily Dispatches Stacked Bar Chart
+  // 4. Transform data for Daily Dispatches Stacked Bar Chart or FY Monthly Stacked Bar Chart
   const dailyChartData = useMemo(() => {
-    // Generate all days in the selected month
-    const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
-    const daysArray = Array.from({ length: daysInMonth }, (_, i) => {
-      const day = i + 1;
-      const formattedDay = day < 10 ? `0${day}` : `${day}`;
-      const monthNum = selectedMonth + 1;
-      const formattedMonth = monthNum < 10 ? `0${monthNum}` : `${monthNum}`;
-      return {
-        dateStr: `${selectedYear}-${formattedMonth}-${formattedDay}`,
-        dayLabel: `${MONTHS[selectedMonth].substring(0, 3)} ${day}`,
+    if (reportViewType === 'monthly') {
+      // Generate all days in the selected month
+      const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
+      const daysArray = Array.from({ length: daysInMonth }, (_, i) => {
+        const day = i + 1;
+        const formattedDay = day < 10 ? `0${day}` : `${day}`;
+        const monthNum = selectedMonth + 1;
+        const formattedMonth = monthNum < 10 ? `0${monthNum}` : `${monthNum}`;
+        return {
+          dateStr: `${selectedYear}-${formattedMonth}-${formattedDay}`,
+          dayLabel: `${MONTHS[selectedMonth].substring(0, 3)} ${day}`,
+          'Fly Ash': 0,
+          'GGBS': 0,
+          'Micro Silica': 0,
+          'Total Dispatched': 0,
+          'Commission': 0,
+        };
+      });
+
+      // Fill dispatch values
+      monthDos.forEach(d => {
+        const po = pos.find(p => p.id === d.poId);
+        if (!po) return;
+
+        const dDate = new Date(d.date);
+        const dayIdx = dDate.getDate() - 1;
+        if (dayIdx >= 0 && dayIdx < daysArray.length && dDate.getFullYear() === selectedYear && dDate.getMonth() === selectedMonth) {
+          const weight = d.receivedWeight ?? d.loadedWeight ?? 0;
+          const material = (po.material || '').toLowerCase();
+
+          if (material.includes('fly ash')) {
+            daysArray[dayIdx]['Fly Ash'] += parseFloat(weight.toFixed(2));
+          } else if (material.includes('ggbs')) {
+            daysArray[dayIdx]['GGBS'] += parseFloat(weight.toFixed(2));
+          } else if (material.includes('silica') || material.includes('micro silica')) {
+            daysArray[dayIdx]['Micro Silica'] += parseFloat(weight.toFixed(2));
+          }
+          daysArray[dayIdx]['Total Dispatched'] += parseFloat(weight.toFixed(2));
+        }
+      });
+
+      // Fill matching commission values (Strictly delivered DOs)
+      deliveredMonthDos.forEach(d => {
+        const po = pos.find(p => p.id === d.poId);
+        if (!po) return;
+
+        const dDate = new Date(d.date);
+        const dayIdx = dDate.getDate() - 1;
+        if (dayIdx >= 0 && dayIdx < daysArray.length && dDate.getFullYear() === selectedYear && dDate.getMonth() === selectedMonth) {
+          const math = getCommissionLogic(po.vendorRate, d.transporterRate, d.receivedWeight);
+          daysArray[dayIdx]['Commission'] += parseFloat(math.totalCommission.toFixed(2));
+        }
+      });
+
+      // Clean decimals
+      return daysArray.map(day => ({
+        ...day,
+        'Fly Ash': parseFloat(day['Fly Ash'].toFixed(2)),
+        'GGBS': parseFloat(day['GGBS'].toFixed(2)),
+        'Micro Silica': parseFloat(day['Micro Silica'].toFixed(2)),
+        'Total Dispatched': parseFloat(day['Total Dispatched'].toFixed(2)),
+        'Commission': parseFloat(day['Commission'].toFixed(2)),
+      })).filter(day => day['Total Dispatched'] > 0 || day['Commission'] > 0 || new Date(day.dateStr).getTime() <= Date.now());
+
+    } else {
+      // Financial Year: 12 months starting from April of selectedYear
+      const fiscalMonths = [
+        { name: 'Apr', monthIndex: 3, year: selectedYear },
+        { name: 'May', monthIndex: 4, year: selectedYear },
+        { name: 'Jun', monthIndex: 5, year: selectedYear },
+        { name: 'Jul', monthIndex: 6, year: selectedYear },
+        { name: 'Aug', monthIndex: 7, year: selectedYear },
+        { name: 'Sep', monthIndex: 8, year: selectedYear },
+        { name: 'Oct', monthIndex: 9, year: selectedYear },
+        { name: 'Nov', monthIndex: 10, year: selectedYear },
+        { name: 'Dec', monthIndex: 11, year: selectedYear },
+        { name: 'Jan', monthIndex: 0, year: selectedYear + 1 },
+        { name: 'Feb', monthIndex: 1, year: selectedYear + 1 },
+        { name: 'Mar', monthIndex: 2, year: selectedYear + 1 },
+      ];
+
+      const monthsArray = fiscalMonths.map(fm => ({
+        dateStr: `${fm.year}-${String(fm.monthIndex + 1).padStart(2, '0')}-01`,
+        dayLabel: fm.name,
         'Fly Ash': 0,
         'GGBS': 0,
         'Micro Silica': 0,
         'Total Dispatched': 0,
         'Commission': 0,
-      };
-    });
+        monthIndex: fm.monthIndex,
+        year: fm.year
+      }));
 
-    // Fill dispatch values
-    monthDos.forEach(d => {
-      const po = pos.find(p => p.id === d.poId);
-      if (!po) return;
+      monthDos.forEach(d => {
+        const po = pos.find(p => p.id === d.poId);
+        if (!po) return;
 
-      const dayIdx = new Date(d.date).getDate() - 1;
-      if (dayIdx >= 0 && dayIdx < daysArray.length) {
-        const weight = d.receivedWeight ?? d.loadedWeight ?? 0;
-        const material = (po.material || '').toLowerCase();
+        const dDate = new Date(d.date);
+        const dMonth = dDate.getMonth();
+        const dYear = dDate.getFullYear();
 
-        if (material.includes('fly ash')) {
-          daysArray[dayIdx]['Fly Ash'] += parseFloat(weight.toFixed(2));
-        } else if (material.includes('ggbs')) {
-          daysArray[dayIdx]['GGBS'] += parseFloat(weight.toFixed(2));
-        } else if (material.includes('silica') || material.includes('micro silica')) {
-          daysArray[dayIdx]['Micro Silica'] += parseFloat(weight.toFixed(2));
+        const matchIdx = monthsArray.findIndex(m => m.monthIndex === dMonth && m.year === dYear);
+        if (matchIdx !== -1) {
+          const weight = d.receivedWeight ?? d.loadedWeight ?? 0;
+          const material = (po.material || '').toLowerCase();
+
+          if (material.includes('fly ash')) {
+            monthsArray[matchIdx]['Fly Ash'] += parseFloat(weight.toFixed(2));
+          } else if (material.includes('ggbs')) {
+            monthsArray[matchIdx]['GGBS'] += parseFloat(weight.toFixed(2));
+          } else if (material.includes('silica') || material.includes('micro silica')) {
+            monthsArray[matchIdx]['Micro Silica'] += parseFloat(weight.toFixed(2));
+          }
+          monthsArray[matchIdx]['Total Dispatched'] += parseFloat(weight.toFixed(2));
         }
-        daysArray[dayIdx]['Total Dispatched'] += parseFloat(weight.toFixed(2));
-      }
-    });
+      });
 
-    // Fill matching commission values (Strictly delivered DOs)
-    deliveredMonthDos.forEach(d => {
-      const po = pos.find(p => p.id === d.poId);
-      if (!po) return;
+      deliveredMonthDos.forEach(d => {
+        const po = pos.find(p => p.id === d.poId);
+        if (!po) return;
 
-      const dayIdx = new Date(d.date).getDate() - 1;
-      if (dayIdx >= 0 && dayIdx < daysArray.length) {
-        const math = getCommissionLogic(po.vendorRate, d.transporterRate, d.receivedWeight);
-        daysArray[dayIdx]['Commission'] += parseFloat(math.totalCommission.toFixed(2));
-      }
-    });
+        const dDate = new Date(d.date);
+        const dMonth = dDate.getMonth();
+        const dYear = dDate.getFullYear();
 
-    // Clean decimals
-    return daysArray.map(day => ({
-      ...day,
-      'Fly Ash': parseFloat(day['Fly Ash'].toFixed(2)),
-      'GGBS': parseFloat(day['GGBS'].toFixed(2)),
-      'Micro Silica': parseFloat(day['Micro Silica'].toFixed(2)),
-      'Total Dispatched': parseFloat(day['Total Dispatched'].toFixed(2)),
-      'Commission': parseFloat(day['Commission'].toFixed(2)),
-    })).filter(day => day['Total Dispatched'] > 0 || day['Commission'] > 0 || new Date(day.dateStr).getTime() <= Date.now());
-  }, [monthDos, deliveredMonthDos, pos, selectedYear, selectedMonth]);
+        const matchIdx = monthsArray.findIndex(m => m.monthIndex === dMonth && m.year === dYear);
+        if (matchIdx !== -1) {
+          const math = getCommissionLogic(po.vendorRate, d.transporterRate, d.receivedWeight);
+          monthsArray[matchIdx]['Commission'] += parseFloat(math.totalCommission.toFixed(2));
+        }
+      });
+
+      return monthsArray.map(m => ({
+        ...m,
+        'Fly Ash': parseFloat(m['Fly Ash'].toFixed(2)),
+        'GGBS': parseFloat(m['GGBS'].toFixed(2)),
+        'Micro Silica': parseFloat(m['Micro Silica'].toFixed(2)),
+        'Total Dispatched': parseFloat(m['Total Dispatched'].toFixed(2)),
+        'Commission': parseFloat(m['Commission'].toFixed(2)),
+      }));
+    }
+  }, [monthDos, deliveredMonthDos, pos, selectedYear, selectedMonth, reportViewType]);
 
   // 4b. Monthly Trend Data (Last 6 Months)
   const monthlyTrendData = useMemo(() => {
@@ -339,22 +430,53 @@ export default function Reports({
         </div>
 
         {/* Filter Toolbar */}
-        <div className="flex items-center space-x-3 self-start md:self-auto">
-          <div className="flex items-center space-x-2 bg-neutral-50 px-3 py-2 border border-[#D1D1CF]">
-            <Calendar className="h-4 w-4 text-[#E65100]" />
-            <select
-              id="report-month-select"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-              className="bg-transparent border-none text-xs font-serif italic font-bold focus:outline-hidden text-neutral-800 cursor-pointer"
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+          {/* View Toggle */}
+          <div className="flex border border-[#D1D1CF] overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => setReportViewType('monthly')}
+              className={`px-3 py-1.5 font-serif italic font-bold transition-all cursor-pointer ${
+                reportViewType === 'monthly'
+                  ? 'bg-[#E65100] text-white'
+                  : 'bg-white text-neutral-700 hover:bg-neutral-50'
+              }`}
             >
-              {MONTHS.map((m, idx) => (
-                <option key={m} value={idx}>{m}</option>
-              ))}
-            </select>
+              Monthly
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportViewType('financial')}
+              className={`px-3 py-1.5 font-serif italic font-bold transition-all cursor-pointer ${
+                reportViewType === 'financial'
+                  ? 'bg-[#E65100] text-white'
+                  : 'bg-white text-neutral-700 hover:bg-neutral-50'
+              }`}
+            >
+              Financial Year
+            </button>
           </div>
 
+          {reportViewType === 'monthly' && (
+            <div className="flex items-center space-x-2 bg-neutral-50 px-3 py-2 border border-[#D1D1CF]">
+              <Calendar className="h-4 w-4 text-[#E65100]" />
+              <select
+                id="report-month-select"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                className="bg-transparent border-none text-xs font-serif italic font-bold focus:outline-hidden text-neutral-800 cursor-pointer"
+              >
+                {MONTHS.map((m, idx) => (
+                  <option key={m} value={idx}>{m}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="flex items-center space-x-2 bg-neutral-50 px-3 py-2 border border-[#D1D1CF]">
+            {reportViewType === 'financial' && (
+              <span className="text-[10px] font-mono font-bold text-neutral-500 uppercase">FY Start:</span>
+            )}
             <select
               id="report-year-select"
               value={selectedYear}
@@ -362,7 +484,9 @@ export default function Reports({
               className="bg-transparent border-none text-xs font-serif italic font-bold focus:outline-hidden text-neutral-800 cursor-pointer"
             >
               {YEARS.map(y => (
-                <option key={y} value={y}>{y}</option>
+                <option key={y} value={y}>
+                  {reportViewType === 'financial' ? `Apr ${y} - Mar ${y+1}` : y}
+                </option>
               ))}
             </select>
           </div>

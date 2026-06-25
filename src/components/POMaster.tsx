@@ -1,30 +1,40 @@
 import React, { useState } from 'react';
-import { PurchaseOrder, Company, Vendor, MaterialType, DespatchOrder } from '../types';
+import { PurchaseOrder, Company, Vendor, Product, MaterialType, DespatchOrder } from '../types';
 import { FileCheck, Plus, Trash2, Edit, Save, X, Calendar, DollarSign, Box, AlertTriangle, Eye, EyeOff, Filter } from 'lucide-react';
 
 interface POMasterProps {
   pos: PurchaseOrder[];
   companies: Company[];
   vendors: Vendor[];
+  products: Product[];
   dos: DespatchOrder[];
   onAddPO: (po: Omit<PurchaseOrder, 'id' | 'createdAt'>) => void;
   onEditPO: (po: PurchaseOrder) => void;
   onDeletePO: (id: string) => void;
   onBack?: () => void;
+  autoOpenForm?: boolean;
 }
 
 export default function POMaster({
   pos,
   companies,
   vendors,
+  products,
   dos,
   onAddPO,
   onEditPO,
   onDeletePO,
   onBack,
+  autoOpenForm = false,
 }: POMasterProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null);
+
+  React.useEffect(() => {
+    if (autoOpenForm) {
+      openAddModal();
+    }
+  }, [autoOpenForm]);
   
   // Safe confirmation state
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
@@ -32,11 +42,34 @@ export default function POMaster({
   // Default filtering for PO Master (Active/Open vs Closed/Completed/Cancelled)
   const [poStatusFilter, setPoStatusFilter] = useState<'Active' | 'Completed' | 'Cancelled' | 'All'>('Active');
 
+  // Financial Year Filter (starts 1 April and ends 31 March)
+  const getInitialFinancialYear = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth(); // 0-indexed
+    const startYear = month >= 3 ? year : year - 1;
+    const endYear = startYear + 1;
+    return `FY ${startYear}-${String(endYear).substring(2)}`;
+  };
+  const [filterFinancialYear, setFilterFinancialYear] = useState<string>(getInitialFinancialYear());
+
+  const isDateInFinancialYear = (dateStr: string, fyStr: string) => {
+    if (fyStr === 'All') return true;
+    const match = fyStr.match(/FY (\d{4})-(\d{2})/);
+    if (!match) return true;
+    const startYear = parseInt(match[1]);
+    const endYear = startYear + 1;
+    const startDate = new Date(`${startYear}-04-01T00:00:00`);
+    const endDate = new Date(`${endYear}-03-31T23:59:59`);
+    const itemDate = new Date(dateStr);
+    return itemDate >= startDate && itemDate <= endDate;
+  };
+
   // Form State
   const [poNumber, setPoNumber] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [vendorId, setVendorId] = useState('');
-  const [material, setMaterial] = useState<MaterialType>('Fly Ash');
+  const [material, setMaterial] = useState<string>('');
   const [totalQuantity, setTotalQuantity] = useState(100);
   const [vendorRate, setVendorRate] = useState(1000);
   const [effectiveDate, setEffectiveDate] = useState('');
@@ -48,7 +81,11 @@ export default function POMaster({
     setPoNumber('');
     setCompanyId(companies[0]?.id || '');
     setVendorId(vendors[0]?.id || '');
-    setMaterial('Fly Ash');
+    
+    // Set material to first active product in master catalogs
+    const firstActiveProduct = products.find(p => p.status === 'Active');
+    setMaterial(firstActiveProduct ? firstActiveProduct.name : '');
+    
     setTotalQuantity(500);
     setVendorRate(1100);
     setEffectiveDate(new Date().toISOString().substring(0, 10));
@@ -141,9 +178,22 @@ export default function POMaster({
 
       {/* Filtering Controls for PO Open vs Closed */}
       <div className="flex flex-col sm:flex-row justify-between items-center bg-slate-50 border border-slate-200/85 p-4 rounded-xl gap-4">
-        <div className="flex items-center space-x-2">
-          <Filter className="h-4 w-4 text-slate-400" />
-          <span className="text-xs font-bold text-slate-705 uppercase tracking-wide">PO Status Quick Filter:</span>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+          <div className="flex items-center space-x-2">
+            <Filter className="h-4 w-4 text-slate-400" />
+            <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">Filters:</span>
+          </div>
+          
+          <select
+            value={filterFinancialYear}
+            onChange={(e) => setFilterFinancialYear(e.target.value)}
+            className="bg-white px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs font-bold focus:outline-hidden text-[#E65100]"
+          >
+            <option value="All">All Financial Years</option>
+            <option value="FY 2025-26">FY 2025-26 (1 Apr 25 - 31 Mar 26)</option>
+            <option value="FY 2026-27">FY 2026-27 (1 Apr 26 - 31 Mar 27)</option>
+            <option value="FY 2027-28">FY 2027-28 (1 Apr 27 - 31 Mar 28)</option>
+          </select>
         </div>
         <div className="flex flex-wrap gap-1.5 justify-end">
           <button
@@ -215,8 +265,9 @@ export default function POMaster({
             <tbody className="divide-y divide-slate-100 text-sm">
               {(() => {
                 const filteredPOs = pos.filter(po => {
-                  if (poStatusFilter === 'All') return true;
-                  return po.status === poStatusFilter;
+                  const statusMatch = poStatusFilter === 'All' || po.status === poStatusFilter;
+                  const fyMatch = isDateInFinancialYear(po.effectiveDate, filterFinancialYear);
+                  return statusMatch && fyMatch;
                 });
 
                 if (filteredPOs.length === 0) {
@@ -247,7 +298,9 @@ export default function POMaster({
                       <td className="p-4">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
                           po.material === 'Fly Ash' ? 'bg-slate-100 text-slate-800' :
-                          po.material === 'GGBS' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
+                          po.material === 'GGBS' ? 'bg-emerald-50 text-emerald-700' :
+                          po.material === 'Micro Silica' ? 'bg-indigo-50 text-indigo-700' :
+                          'bg-amber-50 text-amber-850 border border-amber-200'
                         }`}>
                           {po.material}
                         </span>
@@ -298,9 +351,9 @@ export default function POMaster({
 
       {/* Add / Edit modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-800 text-base">
                 {editingPO ? 'Configure Purchase Contract' : 'Record New Purchase Order'}
               </h3>
@@ -312,7 +365,7 @@ export default function POMaster({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
@@ -334,12 +387,19 @@ export default function POMaster({
                   </label>
                   <select
                     value={material}
-                    onChange={(e) => setMaterial(e.target.value as MaterialType)}
-                    className="w-full text-sm px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-hidden focus:border-indigo-500 bg-white"
+                    onChange={(e) => setMaterial(e.target.value)}
+                    className="w-full text-sm px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-hidden focus:border-indigo-500 bg-white shadow-xs"
+                    required
                   >
-                    <option value="Fly Ash">Fly Ash</option>
-                    <option value="GGBS">GGBS</option>
-                    <option value="Micro Silica">Micro Silica</option>
+                    <option value="">-- Select Registered Product --</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.name}>
+                        {p.name} {p.hsnCode ? `(${p.hsnCode})` : ''} {p.status === 'Inactive' ? '(INACTIVE)' : ''}
+                      </option>
+                    ))}
+                    {material && !products.some(p => p.name.toLowerCase() === material.toLowerCase()) && (
+                      <option value={material}>{material}</option>
+                    )}
                   </select>
                 </div>
               </div>
@@ -443,7 +503,7 @@ export default function POMaster({
                 />
               </div>
 
-              <div className="pt-4 flex justify-end space-x-3 border-t border-slate-100">
+              <div className="pt-4 flex justify-end space-x-3 border-t border-slate-100 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

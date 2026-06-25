@@ -47,6 +47,35 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+function cleanUndefined<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as unknown as T;
+  }
+  if (obj instanceof Date) {
+    return obj as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanUndefined(item)) as unknown as T;
+  }
+  if (typeof obj === 'object') {
+    const proto = Object.getPrototypeOf(obj);
+    if (proto !== null && proto !== Object.prototype) {
+      return obj;
+    }
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const val = obj[key];
+        if (val !== undefined) {
+          cleaned[key] = cleanUndefined(val);
+        }
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
 /**
  * Universal subscription helper that listens to Firestore collections.
  * If the collection is completely empty (e.g. brand new Firebase project), 
@@ -66,7 +95,7 @@ export function subscribeToCollection<T extends { id: string }>(
       const batch = writeBatch(db);
       seedData.forEach((item) => {
         const docRef = doc(db, collectionName, item.id);
-        batch.set(docRef, item);
+        batch.set(docRef, cleanUndefined(item));
       });
       try {
         await batch.commit();
@@ -92,6 +121,31 @@ export function subscribeToCollection<T extends { id: string }>(
 }
 
 /**
+ * Fetch a collection once (non-realtime/manual)
+ */
+export async function fetchCollectionOnce<T extends { id: string }>(
+  collectionName: string,
+  onUpdate: (data: T[]) => void
+) {
+  try {
+    const colRef = collection(db, collectionName);
+    const snapshot = await getDocs(colRef);
+    const items: T[] = [];
+    snapshot.forEach((doc) => {
+      items.push(doc.data() as T);
+    });
+    if (items.length > 0 && 'createdAt' in items[0]) {
+      items.sort((a: any, b: any) => {
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+    }
+    onUpdate(items);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, collectionName);
+  }
+}
+
+/**
  * Saves (adds or edits) a document in its corresponding collection.
  * Using setDoc to preserve consistent ID structures (e.g. "co-1", "do-2026-0001", etc.)
  */
@@ -101,7 +155,7 @@ export async function saveDocument<T extends { id: string }>(
 ) {
   try {
     const docRef = doc(db, collectionName, item.id);
-    await setDoc(docRef, item);
+    await setDoc(docRef, cleanUndefined(item));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionName}/${item.id}`);
   }
@@ -142,7 +196,7 @@ export async function resetCollectionWithSeeds<T extends { id: string }>(
     // Insert all seed documents
     seedData.forEach((item) => {
       const docRef = doc(db, collectionName, item.id);
-      batch.set(docRef, item);
+      batch.set(docRef, cleanUndefined(item));
     });
     
     await batch.commit();

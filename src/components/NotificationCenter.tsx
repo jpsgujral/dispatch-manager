@@ -45,7 +45,7 @@ Please ensure safety guidelines are followed during transit. For live updates or
 
 Best regards,
 Logistics Team
-Sardar Infrastructure & Minerals Ltd`;
+TSG Group`;
 
 export default function NotificationCenter({
   notifications,

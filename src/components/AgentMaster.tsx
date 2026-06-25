@@ -217,21 +217,21 @@ export default function AgentMaster({
 
       {/* Write / Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-neutral-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-none border border-black shadow-2xl w-full max-w-lg overflow-hidden font-sans">
-            <div className="px-6 py-4 border-b border-[#D1D1CF] bg-[#F9F8F6] flex justify-between items-center">
+        <div className="fixed inset-0 bg-neutral-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-none border border-black shadow-2xl w-full max-w-2xl overflow-hidden font-sans max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-[#D1D1CF] bg-[#F9F8F6] flex justify-between items-center shrink-0">
               <h3 className="font-serif font-bold italic text-[#1A1A1A] text-base">
                 {editingAgent ? 'Edit Broker Agent details' : 'Register New Broker Agent'}
               </h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-black p-1 border border-[#D1D1CF] hover:border-black cursor-pointer bg-white"
+                className="text-slate-400 hover:text-black p-1 p-1 border border-[#D1D1CF] hover:border-black cursor-pointer bg-white"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
                 <label className="block text-[10px] font-bold text-neutral-800 uppercase tracking-wider mb-1.5">
                   Full Name / Agency Trade Name <span className="text-[#E65100]">*</span>
@@ -270,7 +270,7 @@ export default function AgentMaster({
                 </div>
               </div>
 
-              <div className="pt-5 flex justify-end space-x-3 border-t border-[#D1D1CF]">
+              <div className="pt-5 flex justify-end space-x-3 border-t border-[#D1D1CF] shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

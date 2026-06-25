@@ -42,6 +42,7 @@ interface TransporterPaymentPanelProps {
   currentUser: AppUser | null;
   onAddPayment: (payout: Omit<TransporterPayment, 'id' | 'createdAt'>) => void;
   onDeletePayment: (paymentId: string) => void;
+  onUpdatePayment: (payment: TransporterPayment) => void;
   onUpdateInvoiceDetails: (doId: string, invoiceData: {
     invoiceNo: string;
     invoiceDate: string;
@@ -63,6 +64,7 @@ export default function TransporterPaymentPanel({
   currentUser,
   onAddPayment,
   onDeletePayment,
+  onUpdatePayment,
   onUpdateInvoiceDetails,
   onUpdateHardCopyStatus,
   onBack,
@@ -74,6 +76,15 @@ export default function TransporterPaymentPanel({
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTransporterFilter, setSelectedTransporterFilter] = useState<string>('');
+
+  // GST withholding and rate selection
+  const [transporterGstRate, setTransporterGstRate] = useState<number>(12);
+  const [carrierGstCompliant, setCarrierGstCompliant] = useState<boolean>(true);
+
+  // Re-release withheld GST state
+  const [releasingPayment, setReleasingPayment] = useState<TransporterPayment | null>(null);
+  const [gstReleaseRefInput, setGstReleaseRefInput] = useState('');
+  const [gstReleaseDateInput, setGstReleaseDateInput] = useState(new Date().toISOString().substring(0, 10));
 
   // Invoice Register Modal
   const [registeringDo, setRegisteringDo] = useState<DespatchOrder | null>(null);
@@ -236,17 +247,25 @@ export default function TransporterPaymentPanel({
     const checkRight = true;
 
     const selectedIds = Object.keys(selectedDoIds).filter(id => selectedDoIds[id]);
-    const totalAmount = calculateSelectedTotalAmount();
+    const baseFreight = calculateSelectedTotalAmount();
+    const gstAmt = baseFreight * (transporterGstRate / 100);
+    const totalPayout = carrierGstCompliant ? (baseFreight + gstAmt) : baseFreight;
 
     onAddPayment({
       transporterId: selectedPaymentTransporterId,
       paymentDate,
-      amountPaid: totalAmount,
+      amountPaid: totalPayout,
       referenceNo,
       paymentMethod,
       paidByCompanyId: payingCompanyId,
       despatchOrderIds: selectedIds,
       notes: paymentNotes || `Settle multiple transport service bills in batch. Invoices cleared: ${selectedIds.map(id => dos.find(d => d.id === id)?.invoiceNo).join(', ')}`,
+      freightAmount: baseFreight,
+      gstRate: transporterGstRate,
+      gstAmount: gstAmt,
+      isGstCompliant: carrierGstCompliant,
+      gstWithheld: !carrierGstCompliant,
+      gstWithheldStatus: carrierGstCompliant ? undefined : 'Withheld',
     });
 
     // Reset states
@@ -255,6 +274,8 @@ export default function TransporterPaymentPanel({
     setIsPaymentModalOpen(false);
     setReferenceNo('');
     setPaymentNotes('');
+    setTransporterGstRate(12);
+    setCarrierGstCompliant(true);
     
     // Switch to ledger view to view success
     setActiveSubTab('ledger');
@@ -823,6 +844,50 @@ export default function TransporterPaymentPanel({
 
                       <td className="px-5 py-4 text-right font-mono text-xs font-black text-slate-900">
                         Rs. {pay.amountPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        
+                        {pay.freightAmount !== undefined && (
+                          <div className="text-[10px] text-slate-400 font-normal leading-normal mt-1.5">
+                            <span>Base Freight: ₹ {pay.freightAmount.toLocaleString('en-IN')}</span>
+                            {pay.gstAmount !== undefined && pay.gstAmount > 0 && (
+                              <span className="block mt-0.5 font-semibold text-slate-500">
+                                GST ({pay.gstRate}%): ₹ {pay.gstAmount.toLocaleString('en-IN')}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {pay.gstAmount !== undefined && pay.gstAmount > 0 && (
+                          <div className="mt-2 text-right">
+                            {pay.gstWithheldStatus === 'Withheld' ? (
+                              <div className="inline-block space-y-1">
+                                <span className="inline-block text-[9px] font-black uppercase tracking-wider text-rose-800 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-xs animate-pulse">
+                                  GST WITHHELD (NON-COMPLIANT)
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setReleasingPayment(pay);
+                                    setGstReleaseRefInput('');
+                                    setGstReleaseDateInput(new Date().toISOString().substring(0, 10));
+                                  }}
+                                  className="block text-[10px] font-bold text-indigo-700 hover:text-indigo-950 underline mt-0.5 w-full text-right cursor-pointer"
+                                >
+                                  Release Held GST Now
+                                </button>
+                              </div>
+                            ) : pay.gstWithheld ? (
+                              <div className="inline-block text-[9px] leading-tight text-emerald-800 bg-emerald-50 border border-emerald-200 p-1.5 font-sans text-left">
+                                <span className="font-extrabold uppercase block select-none">GST Released Post-Compliance</span>
+                                <span className="block select-none text-[8.5px] mt-0.5 text-slate-500 font-mono">Date: {pay.gstReleaseDate}</span>
+                                <span className="block select-none text-[8.5px] text-[#E65100] font-mono font-bold">UTR: {pay.gstReleaseRef || 'N/A'}</span>
+                              </div>
+                            ) : (
+                              <span className="inline-block text-[9px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 select-none text-center">
+                                GST Paid (Compliant Standing)
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       <td className="px-5 py-4 text-right">
@@ -1094,8 +1159,60 @@ export default function TransporterPaymentPanel({
                 />
               </div>
 
+              {/* GST rate & Compliance Setup */}
+              <div className="bg-amber-50/65 border border-amber-200 p-4 space-y-3">
+                <p className="font-mono text-[9px] text-amber-800 uppercase tracking-widest font-black leading-none">GST TAX COMPLIANCE CONVENIENT SETTING</p>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1 font-mono">Applicable GST Rate (%)</label>
+                    <select
+                      value={transporterGstRate}
+                      onChange={(e) => setTransporterGstRate(Number(e.target.value))}
+                      className="w-full text-xs py-1.5 px-2 border border-[#D1D1CF] bg-white font-mono focus:outline-hidden"
+                    >
+                      <option value="12">12% Forward Charge GST</option>
+                      <option value="5">5% Reverse Charge / Road GST</option>
+                      <option value="0">0% Exempted / Nil Rated GST</option>
+                    </select>
+                  </div>
+                  
+                  <div className="flex flex-col justify-end">
+                    <span className="text-[10px] text-stone-500 font-mono block leading-none">
+                      Calculated GST Portion:
+                    </span>
+                    <span className="text-xs font-mono font-extrabold text-[#E65100] mt-1 block">
+                      ₹ {(calculateSelectedTotalAmount() * (transporterGstRate / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border-t border-amber-200/50 pt-2.5">
+                  <label className="flex items-start space-x-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={carrierGstCompliant}
+                      onChange={(e) => setCarrierGstCompliant(e.target.checked)}
+                      className="h-4 w-4 bg-emerald-600 border-[#D1D1CF] focus:ring-emerald-500 mt-0.5 rounded-none"
+                    />
+                    <div className="text-[11px] leading-tight">
+                      <span className="font-bold text-stone-900 block">Carrier is active & compliant with GST department</span>
+                      {carrierGstCompliant ? (
+                        <span className="text-[10px] text-emerald-750 font-semibold block mt-1">
+                          ✔ Paid and included in remittance. Ready to disburse <b>₹ {(calculateSelectedTotalAmount() * (1 + transporterGstRate / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</b>.
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-red-700 font-semibold block mt-1">
+                          ⚠ <b>GST portion held back!</b> Disbursing only base freight amount (<b>₹ {calculateSelectedTotalAmount().toLocaleString('en-IN', { maximumFractionDigits: 2 })}</b>). Will pay held GST later once carrier file reports are verified.
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 font-mono">Remittance Settlement memo / Notes</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 font-mono font-mono">Remittance Settlement memo / Notes</label>
                 <textarea
                   placeholder="Memo details for accounts audit logs..."
                   rows={2}
@@ -1126,6 +1243,95 @@ export default function TransporterPaymentPanel({
                 </button>
               </div>
 
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* RELEASE WITHELD GST MODAL */}
+      {releasingPayment && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto print:hidden">
+          <div className="bg-white rounded-none border-2 border-black shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-stone-200 bg-[#F4F4F1] flex justify-between items-center shrink-0">
+              <h3 className="font-serif font-black italic text-stone-850 text-xs uppercase tracking-wider">
+                Release Withheld GST Portion
+              </h3>
+              <button
+                type="button"
+                className="text-stone-400 hover:text-black font-mono text-xs uppercase"
+                onClick={() => setReleasingPayment(null)}
+              >
+                Close [X]
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!gstReleaseRefInput.trim()) {
+                  alert('Please enter a release UTR reference number.');
+                  return;
+                }
+                const updatedPayment: TransporterPayment = {
+                  ...releasingPayment,
+                  gstWithheldStatus: 'Released',
+                  gstReleaseRef: gstReleaseRefInput,
+                  gstReleaseDate: gstReleaseDateInput,
+                  amountPaid: (releasingPayment.amountPaid || 0) + (releasingPayment.gstAmount || 0), // Include released GST in total paid amount
+                };
+                onUpdatePayment(updatedPayment);
+                setReleasingPayment(null);
+                setGstReleaseRefInput('');
+              }}
+              className="p-6 space-y-4 text-xs text-stone-700"
+            >
+              <div className="bg-emerald-50 border border-emerald-200 p-4 text-[11px] space-y-1.5 rounded-none text-emerald-950">
+                <p className="font-mono font-extrabold uppercase text-[9.5px] leading-tight select-none text-emerald-800">TAX DISBURSAL RECONCILIATION SUMMARY</p>
+                <p className="font-serif italic font-medium">Releasing the previously withheld GST portion of <b>{getTransporterName(releasingPayment.transporterId)}</b> post tax compliance clearance.</p>
+                <div className="flex justify-between font-mono pt-1.5 mt-1 border-t border-emerald-200/50">
+                  <span>Withheld GST Amount:</span>
+                  <strong className="font-extrabold text-[#E65100]">₹ {releasingPayment.gstAmount?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-stone-500 uppercase mb-1 font-mono">GST Release Disbursal Date <span className="text-red-500">*</span></label>
+                <input
+                  type="date"
+                  value={gstReleaseDateInput}
+                  onChange={(e) => setGstReleaseDateInput(e.target.value)}
+                  className="w-full text-xs px-3 py-2 border border-[#D1D1CF] focus:outline-hidden font-mono"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-stone-500 uppercase mb-1 font-mono font-mono">Disbursal Ref No / UTR Transaction ID <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  placeholder="e.g. UTR-GSTREL-202619024"
+                  value={gstReleaseRefInput}
+                  onChange={(e) => setGstReleaseRefInput(e.target.value)}
+                  className="w-full text-xs px-3.5 py-2 border border-[#D1D1CF] focus:outline-hidden font-mono text-[#E65100] font-bold uppercase"
+                  required
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 flex justify-end space-x-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setReleasingPayment(null)}
+                  className="px-4 py-2 border border-[#D1D1CF] text-xs font-serif italic focus:outline-hidden"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-emerald-700 hover:bg-black text-white text-xs uppercase tracking-wider font-bold rounded-none transition-colors cursor-pointer"
+                >
+                  Confirm GST Released
+                </button>
+              </div>
             </form>
           </div>
         </div>

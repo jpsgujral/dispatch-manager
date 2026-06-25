@@ -15,7 +15,8 @@ import {
   Database,
   CheckCircle2,
   Unlock,
-  KeyRound
+  KeyRound,
+  Edit
 } from 'lucide-react';
 
 interface UserAdminPanelProps {
@@ -26,6 +27,7 @@ interface UserAdminPanelProps {
   onUpdateUserRights: (userId: string, rights: UserRights) => void;
   onToggleUserStatus: (userId: string) => void;
   onDeleteUser: (userId: string) => void;
+  onUpdateUser?: (updatedUser: AppUser) => void;
   onBack?: () => void;
 }
 
@@ -37,12 +39,16 @@ export default function UserAdminPanel({
   onUpdateUserRights,
   onToggleUserStatus,
   onDeleteUser,
+  onUpdateUser,
   onBack,
 }: UserAdminPanelProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'Admin' | 'Executive' | 'Viewer'>('Executive');
+  const [userStatus, setUserStatus] = useState<'Active' | 'Inactive'>('Active');
+  const [passcode, setPasscode] = useState('');
 
   // Form checkable rights states
   const [rights, setRights] = useState<UserRights>({
@@ -54,6 +60,36 @@ export default function UserAdminPanel({
     manageLedger: false,
     manageAdmin: false,
   });
+
+  const openAddModal = () => {
+    setEditingUser(null);
+    setName('');
+    setEmail('');
+    setRole('Executive');
+    setPasscode('password1234');
+    setRights({
+      manageCompanies: true,
+      manageVendors: true,
+      managePOs: true,
+      manageTransporters: true,
+      manageDespatches: true,
+      manageLedger: false,
+      manageAdmin: false,
+    });
+    setUserStatus('Active');
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (user: AppUser) => {
+    setEditingUser(user);
+    setName(user.name);
+    setEmail(user.email);
+    setRole(user.role);
+    setRights(user.rights);
+    setUserStatus(user.status || 'Active');
+    setPasscode(user.passcode || 'password1234');
+    setIsModalOpen(true);
+  };
 
   const onRoleChange = (selectedRole: 'Admin' | 'Executive' | 'Viewer') => {
     setRole(selectedRole);
@@ -104,17 +140,39 @@ export default function UserAdminPanel({
       return;
     }
 
-    onAddUser({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      role,
-      status: 'Active',
-      rights,
-    });
+    if (editingUser) {
+      const updated: AppUser = {
+        ...editingUser,
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        role,
+        status: userStatus,
+        rights,
+        passcode: passcode.trim() || 'password1234',
+      };
+      if (onUpdateUser) {
+        onUpdateUser(updated);
+      } else {
+        onUpdateUserRights(editingUser.id, rights);
+        if (editingUser.status !== userStatus) {
+          onToggleUserStatus(editingUser.id);
+        }
+      }
+    } else {
+      onAddUser({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        role,
+        status: userStatus,
+        rights,
+        passcode: passcode.trim() || 'password1234',
+      });
+    }
 
     setName('');
     setEmail('');
     setRole('Executive');
+    setEditingUser(null);
     setIsModalOpen(false);
   };
 
@@ -144,7 +202,7 @@ export default function UserAdminPanel({
           </p>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={openAddModal}
           className="flex items-center space-x-2 px-5 py-2.5 bg-[#E65100] hover:bg-black text-white text-xs uppercase tracking-wider font-bold rounded-none transition-colors cursor-pointer shrink-0"
         >
           <UserPlus className="h-4 w-4" />
@@ -232,8 +290,8 @@ export default function UserAdminPanel({
                 <th className="px-5 py-3">Full Representative Name</th>
                 <th className="px-5 py-3">Terminals E-Mail</th>
                 <th className="px-5 py-3">Clearance Role</th>
+                <th className="px-5 py-3">Secure PIN</th>
                 <th className="px-5 py-3 text-center">Status</th>
-                <th className="px-5 py-3 text-center">Rigths / Permissions Matrix</th>
                 <th className="px-5 py-3 text-right">Terminals actions</th>
               </tr>
             </thead>
@@ -265,6 +323,10 @@ export default function UserAdminPanel({
                       </span>
                     </td>
 
+                    <td className="px-5 py-4 text-xs font-mono font-bold text-stone-600">
+                      {item.passcode || 'password1234'}
+                    </td>
+
                     <td className="px-5 py-4 text-center">
                       <button
                         type="button"
@@ -280,123 +342,38 @@ export default function UserAdminPanel({
                       </button>
                     </td>
 
-                    {/* Interactive Rights Matrix inside row */}
-                    <td className="px-5 py-4 select-none">
-                      <div className="flex flex-col font-mono text-[9.5px] text-slate-500 gap-1 mt-1 leading-normal">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 max-w-lg">
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.manageCompanies}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, manageCompanies: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.manageCompanies ? "text-stone-800 font-bold" : ""}>Companies</span>
-                          </label>
-
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.manageVendors}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, manageVendors: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.manageVendors ? "text-stone-800 font-bold" : ""}>Vendors</span>
-                          </label>
-
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.managePOs}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, managePOs: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.managePOs ? "text-stone-800 font-bold" : ""}>PO Contracts</span>
-                          </label>
-
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.manageTransporters}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, manageTransporters: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.manageTransporters ? "text-stone-800 font-bold" : ""}>Carriers</span>
-                          </label>
-
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.manageDespatches}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, manageDespatches: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.manageDespatches ? "text-stone-800 font-bold" : ""}>Transits</span>
-                          </label>
-
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.manageLedger}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, manageLedger: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.manageLedger ? "text-stone-800 font-bold" : ""}>Ledger Ledger</span>
-                          </label>
-
-                          <label className="flex items-center space-x-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={item.rights.manageAdmin}
-                              onChange={(e) => {
-                                const copy = { ...item.rights, manageAdmin: e.target.checked };
-                                onUpdateUserRights(item.id, copy);
-                              }}
-                              className="h-3.5 w-3.5 text-indigo-600 focus:ring-0"
-                            />
-                            <span className={item.rights.manageAdmin ? "text-stone-800 font-bold" : ""}>Admin Desk</span>
-                          </label>
-                        </div>
-                      </div>
-                    </td>
+                    {/* Actions and editing is fully handled in User edit profile modal */}
 
                     <td className="px-5 py-4 text-right">
-                      {item.role === 'Admin' ? (
-                        <span className="text-[10px] text-slate-400 italic">Protected Admin</span>
-                      ) : (
+                      <div className="flex justify-end items-center space-x-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            if (isSelectedSIM) {
-                              alert('You cannot delete the user account you are currently playing as. Switch active user first.');
-                              return;
-                            }
-                            onDeleteUser(item.id);
-                          }}
-                          className="p-1.5 border border-[#D1D1CF] text-slate-400 hover:text-red-650 hover:text-red-750 hover:text-red-600 hover:bg-red-50 hover:border-red-150 transition-all rounded"
-                          title="Delete User"
+                          onClick={() => openEditModal(item)}
+                          className="p-1.5 border border-[#D1D1CF] text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 hover:border-indigo-200 transition-all rounded cursor-pointer"
+                          title="Edit User Profile & Permissions"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Edit className="h-3.5 w-3.5" />
                         </button>
-                      )}
+
+                        {item.role === 'Admin' ? (
+                          <span className="text-[10px] text-slate-400 italic font-medium px-1">Protected</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isSelectedSIM) {
+                                alert('You cannot delete the user account you are currently playing as. Switch active user first.');
+                                return;
+                              }
+                              onDeleteUser(item.id);
+                            }}
+                            className="p-1.5 border border-[#D1D1CF] text-slate-400 hover:text-red-650 hover:text-red-750 hover:text-red-600 hover:bg-red-50 hover:border-red-150 transition-all rounded cursor-pointer"
+                            title="Delete User"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -454,13 +431,13 @@ function getUserRights(uid) {
         </div>
       </div>
 
-      {/* CREATE NEW USER REGISTER MODE */}
+      {/* CREATE / EDIT USER REGISTER MODE */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-none border-2 border-black shadow-xl w-full max-w-lg overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <h3 className="font-serif font-bold italic text-slate-800 text-sm">
-                Register New Accredited System User
+                {editingUser ? 'Configure System User Profile & Rights' : 'Register New Accredited System User'}
               </h3>
               <button
                 type="button"
@@ -496,17 +473,48 @@ function getUserRights(uid) {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">System clearance Role</label>
+                  <select
+                    value={role}
+                    onChange={(e) => onRoleChange(e.target.value as any)}
+                    className="w-full text-xs py-2 px-2 border border-slate-200 bg-white font-serif font-bold italic focus:outline-hidden"
+                  >
+                    <option value="Admin">Admin (All rights true)</option>
+                    <option value="Executive">Executive (Manage operations)</option>
+                    <option value="Viewer">Viewer (Read-only guest)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Authorization Status</label>
+                  <select
+                    value={userStatus}
+                    onChange={(e) => setUserStatus(e.target.value as 'Active' | 'Inactive')}
+                    className="w-full text-xs py-2 px-2 border border-slate-200 bg-white font-sans font-bold focus:outline-hidden"
+                  >
+                    <option value="Active">Active (Permitted)</option>
+                    <option value="Inactive">Inactive (Suspended)</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">System clearance Role</label>
-                <select
-                  value={role}
-                  onChange={(e) => onRoleChange(e.target.value as any)}
-                  className="w-full text-xs py-2 px-2 border border-slate-200 bg-white font-serif font-bold italic focus:outline-hidden"
-                >
-                  <option value="Admin">Admin (All rights true)</option>
-                  <option value="Executive">Executive (Manage operations, no records editing / payments)</option>
-                  <option value="Viewer">Viewer (Read-only guest)</option>
-                </select>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
+                  Terminal Passcode PIN <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. password1234"
+                  value={passcode}
+                  onChange={(e) => setPasscode(e.target.value)}
+                  className="w-full text-xs px-3.5 py-2 border border-slate-200 focus:outline-hidden font-mono text-stone-900 font-bold"
+                  required
+                />
+                <span className="block text-[9px] text-slate-400 mt-1 italic">
+                  This custom passcode PIN will be used by the user when logging in via the "Secure Passcode" tab.
+                </span>
               </div>
 
               {/* Checkboxes matrix form */}
@@ -597,7 +605,7 @@ function getUserRights(uid) {
                   type="submit"
                   className="px-5 py-2.5 bg-[#E65100] hover:bg-black text-white text-xs uppercase tracking-wider font-bold rounded-none transition-colors cursor-pointer"
                 >
-                  Register User Terminal
+                  {editingUser ? 'Save Configuration' : 'Register User Terminal'}
                 </button>
               </div>
             </form>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { DespatchOrder, PurchaseOrder, Company, Vendor, Transporter, Agent, SourceLocation } from '../types';
+import { DespatchOrder, PurchaseOrder, Company, Vendor, Transporter, Agent, SourceLocation, Product } from '../types';
 import { getCommissionLogic } from '../data';
+import { exportDOsToCSV } from '../excelUtils';
 import { 
   FileText, 
   Plus, 
@@ -20,7 +21,13 @@ import {
   HelpCircle,
   AlertTriangle,
   Upload,
-  MapPin
+  MapPin,
+  Edit,
+  Download,
+  Clock,
+  ArrowRight,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface DOMasterProps {
@@ -28,12 +35,14 @@ interface DOMasterProps {
   pos: PurchaseOrder[];
   companies: Company[];
   vendors: Vendor[];
+  products: Product[];
   transporters: Transporter[];
   agents: Agent[];
   sources: SourceLocation[];
   onAddSource: (name: string, pincode: string) => SourceLocation;
   
   onAddDO: (despatch: Omit<DespatchOrder, 'id' | 'doNumber' | 'createdAt'>) => void;
+  onEditDO: (despatch: DespatchOrder) => void;
   onUpdateReceivedWeight: (
     id: string, 
     receivedWeight: number | null, 
@@ -45,6 +54,7 @@ interface DOMasterProps {
   onCancelDO: (id: string) => void;
   onSelectChallan: (doItem: DespatchOrder) => void;
   onBack?: () => void;
+  autoOpenForm?: boolean;
 }
 
 export default function DOMaster({
@@ -52,17 +62,21 @@ export default function DOMaster({
   pos,
   companies,
   vendors,
+  products,
   transporters,
   agents,
   sources,
   onAddSource,
   onAddDO,
+  onEditDO,
   onUpdateReceivedWeight,
   onCancelDO,
   onSelectChallan,
   onBack,
+  autoOpenForm = false,
 }: DOMasterProps) {
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [editingDO, setEditingDO] = useState<DespatchOrder | null>(null);
   const [isDeliverModalOpen, setIsDeliverModalOpen] = useState(false);
   const [currentDeliverDo, setCurrentDeliverDo] = useState<DespatchOrder | null>(null);
 
@@ -73,6 +87,29 @@ export default function DOMaster({
   const [filterMaterial, setFilterMaterial] = useState<string>('All');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterAgent, setFilterAgent] = useState<string>('All');
+
+  // Financial Year Filter (starts 1 April and ends 31 March)
+  const getInitialFinancialYear = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth(); // 0-indexed
+    const startYear = month >= 3 ? year : year - 1;
+    const endYear = startYear + 1;
+    return `FY ${startYear}-${String(endYear).substring(2)}`;
+  };
+  const [filterFinancialYear, setFilterFinancialYear] = useState<string>(getInitialFinancialYear());
+
+  const isDateInFinancialYear = (dateStr: string, fyStr: string) => {
+    if (fyStr === 'All') return true;
+    const match = fyStr.match(/FY (\d{4})-(\d{2})/);
+    if (!match) return true;
+    const startYear = parseInt(match[1]);
+    const endYear = startYear + 1;
+    const startDate = new Date(`${startYear}-04-01T00:00:00`);
+    const endDate = new Date(`${endYear}-03-31T23:59:59`);
+    const itemDate = new Date(dateStr);
+    return itemDate >= startDate && itemDate <= endDate;
+  };
 
   // Wizard States
   const [selectedPoId, setSelectedPoId] = useState('');
@@ -102,6 +139,22 @@ export default function DOMaster({
   const [docUrlState, setDocUrlState] = useState('');
   const [docNameState, setDocNameState] = useState('');
 
+  // Route Compliance expanded logs map tracking state
+  const [expandedDoLogs, setExpandedDoLogs] = useState<Record<string, boolean>>({});
+
+  const toggleDoLogs = (doId: string) => {
+    setExpandedDoLogs(prev => ({
+      ...prev,
+      [doId]: !prev[doId]
+    }));
+  };
+
+  React.useEffect(() => {
+    if (autoOpenForm) {
+      startDispatchWizard();
+    }
+  }, [autoOpenForm]);
+
   // Auto pick values on PO selection change (keeping empty for manual entry as requested)
   const handlePoChange = (poId: string) => {
     setSelectedPoId(poId);
@@ -119,6 +172,7 @@ export default function DOMaster({
       return;
     }
     
+    setEditingDO(null);
     setSelectedPoId('');
     setSelectedPlant('');
     setTransporterId('');
@@ -134,6 +188,29 @@ export default function DOMaster({
     setDocUrlState('');
     setDocNameState('');
     setSelectedSourceId('');
+    setIsAddingSourceInline(false);
+    setInlineSourceName('');
+    setInlineSourcePincode('');
+    setIsWizardOpen(true);
+  };
+
+  const startEditDoWizard = (item: DespatchOrder) => {
+    setEditingDO(item);
+    setSelectedPoId(item.poId || '');
+    setSelectedPlant(item.vendorPlant || '');
+    setTransporterId(item.transporterId || '');
+    setVehicleNumber(item.vehicleNumber || '');
+    setAgentId(item.agentId || 'direct');
+    setTransporterRate(item.transporterRate !== undefined ? String(item.transporterRate) : '');
+    setLoadedWeightInput(item.loadedWeight !== null ? String(item.loadedWeight) : '');
+    setReceivedWeightInput(item.receivedWeight !== null ? String(item.receivedWeight) : '');
+    setCreationStatus(item.status);
+    setDriverName(item.driverName || '');
+    setDriverPhone(item.driverPhone || '');
+    setRemarks(item.remarks || '');
+    setDocUrlState(item.deliveryDocUrl || '');
+    setDocNameState(item.deliveryDocName || '');
+    setSelectedSourceId(item.sourceId || '');
     setIsAddingSourceInline(false);
     setInlineSourceName('');
     setInlineSourcePincode('');
@@ -188,25 +265,46 @@ export default function DOMaster({
     const loadedWParsed = loadedWeightInput.trim() === '' ? null : Number(loadedWeightInput);
     const receivedWParsed = receivedWeightInput.trim() === '' ? null : Number(receivedWeightInput);
 
-    // If Delivered, we can update status to 'Delivered'
-    onAddDO({
-      date: new Date().toISOString().substring(0, 10),
-      poId: selectedPoId,
-      vendorPlant: selectedPlant,
-      transporterId,
-      vehicleNumber: vehicleNumber.trim().toUpperCase(),
-      agentId: agentId === 'direct' ? null : agentId,
-      sourceId: finalSourceId,
-      transporterRate: Number(transporterRate),
-      loadedWeight: loadedWParsed,
-      receivedWeight: receivedWParsed,
-      status: creationStatus,
-      driverName,
-      driverPhone,
-      remarks,
-      deliveryDocUrl: docUrlState || undefined,
-      deliveryDocName: docNameState || undefined,
-    });
+    if (editingDO) {
+      onEditDO({
+        ...editingDO,
+        poId: selectedPoId,
+        vendorPlant: selectedPlant,
+        transporterId,
+        vehicleNumber: vehicleNumber.trim().toUpperCase(),
+        agentId: agentId === 'direct' ? null : agentId,
+        sourceId: finalSourceId,
+        transporterRate: Number(transporterRate),
+        loadedWeight: loadedWParsed,
+        receivedWeight: receivedWParsed,
+        status: creationStatus,
+        driverName,
+        driverPhone,
+        remarks,
+        deliveryDocUrl: docUrlState || undefined,
+        deliveryDocName: docNameState || undefined,
+      });
+      setEditingDO(null);
+    } else {
+      onAddDO({
+        date: new Date().toISOString().substring(0, 10),
+        poId: selectedPoId,
+        vendorPlant: selectedPlant,
+        transporterId,
+        vehicleNumber: vehicleNumber.trim().toUpperCase(),
+        agentId: agentId === 'direct' ? null : agentId,
+        sourceId: finalSourceId,
+        transporterRate: Number(transporterRate),
+        loadedWeight: loadedWParsed,
+        receivedWeight: receivedWParsed,
+        status: creationStatus,
+        driverName,
+        driverPhone,
+        remarks,
+        deliveryDocUrl: docUrlState || undefined,
+        deliveryDocName: docNameState || undefined,
+      });
+    }
 
     setIsWizardOpen(false);
   };
@@ -283,7 +381,8 @@ export default function DOMaster({
     const agentMatch = filterAgent === 'All' || 
                        (filterAgent === 'direct' && item.agentId === null) ||
                        (filterAgent !== 'direct' && item.agentId === filterAgent);
-    return matMatch && statusMatch && agentMatch;
+    const fyMatch = isDateInFinancialYear(item.date, filterFinancialYear);
+    return matMatch && statusMatch && agentMatch && fyMatch;
   });
 
   return (
@@ -310,14 +409,24 @@ export default function DOMaster({
           </h2>
           <p className="text-xs text-slate-500 mt-1">Issue bulker transit slips, record weighbridge receipt measurements, and examine commission structures.</p>
         </div>
-        <button
-          id="btn-raise-do"
-          onClick={startDispatchWizard}
-          className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-505 text-white text-sm font-semibold rounded-lg transition-colors cursor-pointer"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Prepare Despatch Order (DO)</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => exportDOsToCSV(filteredDos, pos, companies, vendors, transporters, agents, sources)}
+            className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer shadow-xs"
+            title="Export filtered listings to Microsoft Excel compatible CSV file"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export to Excel</span>
+          </button>
+          <button
+            id="btn-raise-do"
+            onClick={startDispatchWizard}
+            className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-505 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Prepare Despatch Order (DO)</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter and stats overview segment */}
@@ -334,12 +443,18 @@ export default function DOMaster({
             <select
               value={filterMaterial}
               onChange={(e) => setFilterMaterial(e.target.value)}
-              className="bg-white px-2 py-1 border border-slate-200 rounded font-medium focus:outline-hidden text-slate-700"
+              className="bg-white px-2 py-1 border border-slate-200 rounded font-medium focus:outline-hidden text-slate-700 font-sans"
             >
               <option value="All">All Materials</option>
-              <option value="Fly Ash">Fly Ash</option>
-              <option value="GGBS">GGBS</option>
-              <option value="Micro Silica">Micro Silica</option>
+              {products.map(p => (
+                <option key={p.id} value={p.name}>{p.name}</option>
+              ))}
+              {/* Fallback for other materials found in active POs */}
+              {Array.from(new Set(pos.map(postItem => postItem.material)))
+                .filter(mat => !products.some(p => p.name.toLowerCase() === mat.toLowerCase()))
+                .map(mat => (
+                  <option key={mat} value={mat}>{mat}</option>
+                ))}
             </select>
           </div>
 
@@ -359,13 +474,26 @@ export default function DOMaster({
             <select
               value={filterAgent}
               onChange={(e) => setFilterAgent(e.target.value)}
-              className="bg-white px-2 py-1 border border-slate-200 rounded font-medium focus:outline-hidden text-slate-700"
+              className="bg-white px-2 py-1 border border-slate-200 rounded font-semibold focus:outline-hidden text-slate-700"
             >
               <option value="All">All Representation</option>
               <option value="direct">Direct Delivery</option>
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
+            </select>
+          </div>
+
+          <div>
+            <select
+              value={filterFinancialYear}
+              onChange={(e) => setFilterFinancialYear(e.target.value)}
+              className="bg-white px-2.5 py-1 border border-slate-200 rounded font-bold focus:outline-hidden text-[#E65100] font-sans"
+            >
+              <option value="All">All Financial Years</option>
+              <option value="FY 2025-26">FY 2025-26 (1 Apr 25 - 31 Mar 26)</option>
+              <option value="FY 2026-27">FY 2026-27 (1 Apr 26 - 31 Mar 27)</option>
+              <option value="FY 2027-28">FY 2027-28 (1 Apr 27 - 31 Mar 28)</option>
             </select>
           </div>
         </div>
@@ -377,27 +505,24 @@ export default function DOMaster({
       </div>
 
       {/* Main Table listings */}
-      <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="overflow-auto max-h-[70vh] relative">
           <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 font-semibold text-slate-400 uppercase tracking-wider">
-                <th className="p-4">Do Number</th>
-                <th className="p-4">Reference Contracts</th>
-                <th className="p-4">Carrier vehicle</th>
-                <th className="p-4">Client unload Site</th>
-                <th className="p-4 text-right">Loaded weight</th>
-                <th className="p-4 text-right">Received weight</th>
-                <th className="p-4 text-center">Delivery Doc (POD)</th>
-                <th className="p-4 text-right">Margins/Commissions (Profit/Agent)</th>
-                <th className="p-4 text-center">Status</th>
-                <th className="p-4 text-right">Print & Actions</th>
+            <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 shadow-xs">
+              <tr className="bg-slate-50 font-semibold text-slate-400 uppercase tracking-wider">
+                <th className="p-4 bg-slate-50 sticky top-0 z-10">Do Number</th>
+                <th className="p-4 bg-slate-50 sticky top-0 z-10">Vendor Name</th>
+                <th className="p-4 bg-slate-50 sticky top-0 z-10">Transporter</th>
+                <th className="p-4 text-right bg-slate-50 sticky top-0 z-10">Received weight (MT)</th>
+                <th className="p-4 text-right bg-slate-50 sticky top-0 z-10">Partners Profit</th>
+                <th className="p-4 text-center bg-slate-50 sticky top-0 z-10">Status</th>
+                <th className="p-4 text-right bg-slate-50 sticky top-0 z-10">Print & Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-sans">
               {filteredDos.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-12 text-center text-slate-400">
+                  <td colSpan={7} className="p-12 text-center text-slate-400">
                     <FileText className="h-10 w-10 mx-auto text-slate-300 mb-3" />
                     <p className="font-semibold">No dispatch orders matching filters</p>
                     <p className="text-xs text-slate-400 mt-1">Select other filters or click "Prepare Despatch Order" to route a new carrier bulk.</p>
@@ -414,7 +539,8 @@ export default function DOMaster({
                   const mLog = po ? getCommissionLogic(po.vendorRate, item.transporterRate, item.receivedWeight ?? (item.loadedWeight ?? 0)) : null;
 
                   return (
-                    <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                    <React.Fragment key={item.id}>
+                      <tr className="hover:bg-slate-50/50 transition-colors">
                       {/* DO Title & Date */}
                       <td className="p-4 font-mono">
                         <span className="font-bold text-slate-900 block">{item.doNumber}</span>
@@ -426,8 +552,7 @@ export default function DOMaster({
                         <span className="text-[10px] uppercase font-bold text-indigo-700 bg-indigo-50/50 px-1.5 py-0.5 rounded border border-indigo-100">
                           {po?.material}
                         </span>
-                        <div className="font-medium text-slate-800 pt-1">{vendor?.name.split(' ')[0]}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">PO: {po?.poNumber}</div>
+                        <div className="font-medium text-slate-800 pt-1">{vendor?.name || 'N/A'}</div>
                         <div className="text-[10px] text-slate-400">Via: <span className="font-medium">{company?.name.split(' ')[0]}</span></div>
                       </td>
 
@@ -436,39 +561,13 @@ export default function DOMaster({
                         <strong className="font-mono text-slate-900 text-xs px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded block w-fit">
                           {item.vehicleNumber}
                         </strong>
-                        <div className="text-slate-500 font-medium pt-1 text-[11px]">{transporter?.name}</div>
-                        {item.driverName && (
-                          <div className="text-[10px] text-slate-400">Dr: {item.driverName}</div>
-                        )}
-                      </td>
-
-                      {/* Site delivery camp location */}
-                      <td className="p-4 max-w-sm">
-                        <div className="flex items-start space-x-1">
-                          <Layers className="h-3 w-3 text-slate-400 mt-0.5 shrink-0" />
-                          <span className="font-medium text-slate-700">{item.vendorPlant}</span>
-                        </div>
-                        {item.sourceId && (() => {
-                          const src = sources.find(s => s.id === item.sourceId);
-                          return src ? (
-                            <div className="text-[10px] text-[#E65100] font-sans font-bold mt-1 bg-amber-50 border border-amber-200/50 px-1.5 py-0.5 rounded-sm w-fit flex items-center space-x-1">
-                              <span>Origin:</span>
-                              <span className="font-serif italic font-medium text-stone-800">{src.name}</span>
-                              <span className="font-mono text-[9px] text-[#E65100]/80">({src.pincode})</span>
-                            </div>
-                          ) : null;
-                        })()}
-                      </td>
-
-                      {/* Weights Segment */}
-                      <td className="p-4 text-right font-mono font-medium text-slate-900">
-                        {item.loadedWeight !== null ? `${item.loadedWeight.toFixed(2)} MT` : 'Pending'}
+                        <div className="text-slate-500 font-medium pt-1 text-[11px]">{transporter?.name || 'N/A'}</div>
                       </td>
 
                       <td className="p-4 text-right">
                         {item.receivedWeight !== null ? (
                           <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-1 rounded">
-                            {item.receivedWeight.toFixed(2)} MT
+                            {item.receivedWeight.toFixed(2)}
                           </span>
                         ) : (
                           <div className="space-y-1">
@@ -485,77 +584,17 @@ export default function DOMaster({
                         )}
                       </td>
 
-                      {/* Delivery Doc / POD column */}
-                      <td className="p-4 text-center">
-                        {item.status === 'Cancelled' ? (
-                          <span className="text-slate-400 italic font-mono">-</span>
-                        ) : item.status !== 'Delivered' ? (
-                          <span className="text-[10px] text-slate-400 font-medium italic">Pending Delivery</span>
-                        ) : item.deliveryDocUrl ? (
-                          <div className="flex flex-col items-center space-y-1">
-                            <a
-                              href={item.deliveryDocUrl}
-                              download={item.deliveryDocName || 'POD_Document'}
-                              className="inline-flex items-center space-x-1 text-indigo-700 hover:text-indigo-900 font-bold text-[11px] hover:underline"
-                              title={item.deliveryDocName || 'Download Proof of Delivery'}
-                            >
-                              <FileText className="h-3 w-3 shrink-0" />
-                              <span className="truncate max-w-[120px] font-mono">
-                                {item.deliveryDocName || 'POD File'}
-                              </span>
-                            </a>
-                            <button
-                              onClick={() => handleRemoveDoc(item)}
-                              className="text-[9px] text-[#E65100]/80 hover:text-[#E65100] hover:underline block"
-                            >
-                              Remove Document
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center">
-                            <label
-                              htmlFor={`file-upload-cell-${item.id}`}
-                              className="inline-flex items-center space-x-1 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 hover:border-indigo-400 text-indigo-700 rounded text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
-                            >
-                              <Upload className="h-3 w-3" />
-                              <span>Upload POD</span>
-                            </label>
-                            <input
-                              type="file"
-                              id={`file-upload-cell-${item.id}`}
-                              accept="application/pdf,image/*"
-                              className="hidden"
-                              onChange={(e) => handleDirectFileUpload(item, e)}
-                            />
-                            <span className="text-[9px] text-slate-400 mt-0.5 block">PDF or Image (under 5MB)</span>
-                          </div>
-                        )}
-                      </td>
-
                       {/* Finances margins */}
                       <td className="p-4 text-right font-mono">
                         {mLog ? (
                           <div className="space-y-1 text-right">
-                            <div className="text-[10px] text-slate-500">
-                              Profit: <strong className="text-slate-800">Rs {mLog.profitPerMT.toFixed(0)}/MT</strong>
-                            </div>
-                            
                             {item.agentId ? (
                               <div className="text-[10px] text-amber-700 bg-amber-50 p-1 rounded border border-amber-100 inline-block">
                                 Agent: {agent?.name.split(' ')[0]} <br />
                                 Commission: <strong>Rs. {Math.round(mLog.totalCommission).toLocaleString()}</strong>
-                                <span className="text-[9px] text-slate-400 block font-normal">
-                                  ({mLog.commissionPercentage}% on Rs. {Math.round(mLog.totalGrossProfit)})
-                                </span>
                               </div>
                             ) : (
                               <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wider block">Direct Order / No Agent</span>
-                            )}
-
-                            {item.receivedWeight !== null && (
-                              <div className="text-[10px] text-emerald-700 font-bold font-mono">
-                                Net Earn: Rs. {Math.round(mLog.netCompanyProfit).toLocaleString()}
-                              </div>
                             )}
                           </div>
                         ) : '--'}
@@ -563,12 +602,23 @@ export default function DOMaster({
 
                       {/* Status */}
                       <td className="p-4 text-center">
-                        <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-semibold ${
-                          item.status === 'Delivered' ? 'bg-emerald-100 text-emerald-800' :
-                          item.status === 'Cancelled' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
-                        }`}>
-                          {item.status}
-                        </span>
+                        <div className="flex flex-col items-center space-y-1">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            item.status === 'Delivered' ? 'bg-emerald-100 text-emerald-800' :
+                            item.status === 'Cancelled' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {item.status}
+                          </span>
+                          <button
+                            onClick={() => toggleDoLogs(item.id)}
+                            className="inline-flex items-center space-x-1 text-[10px] text-indigo-600 hover:text-indigo-800 hover:underline font-semibold cursor-pointer py-0.5 mt-1"
+                            title="View Route Compliance Log & Turnaround Time Audit"
+                          >
+                            <Clock className="h-2.5 w-2.5 mr-0.5" />
+                            <span>Log</span>
+                            {expandedDoLogs[item.id] ? <ChevronUp className="h-2.5 w-2.5 ml-0.5" /> : <ChevronDown className="h-2.5 w-2.5 ml-0.5" />}
+                          </button>
+                        </div>
                       </td>
 
                       {/* Printing Actions and cancelling */}
@@ -579,6 +629,14 @@ export default function DOMaster({
                         >
                           <Printer className="h-3 w-3" />
                           <span>View Challan</span>
+                        </button>
+
+                        <button
+                          onClick={() => startEditDoWizard(item)}
+                          className="flex items-center space-x-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded text-[11px] font-semibold transition-colors mx-auto shrink-0 w-full justify-center border border-emerald-200 mt-1 cursor-pointer"
+                        >
+                          <Edit className="h-3 w-3" />
+                          <span>Edit Details</span>
                         </button>
 
                         {item.status !== 'Cancelled' && (
@@ -593,6 +651,142 @@ export default function DOMaster({
                         )}
                       </td>
                     </tr>
+                    {expandedDoLogs[item.id] && (
+                      <tr key={`log-row-${item.id}`} className="bg-slate-50/50">
+                        <td colSpan={7} className="p-4 border-t border-b border-slate-100">
+                          <div className="bg-white rounded-lg p-5 border border-slate-200/85 shadow-sm max-w-4xl mx-auto">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between mb-5 pb-3 border-b border-slate-100 gap-3">
+                              <div className="flex items-center space-x-2.5">
+                                <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                                  <Clock className="h-5 w-5" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Route Compliance Audit & Turnaround Time (TAT) Log</h4>
+                                  <p className="text-[11px] text-slate-400">DO Reference Field: <span className="font-mono font-semibold">{item.doNumber}</span></p>
+                                </div>
+                              </div>
+                              
+                              {/* Summary Performance Info */}
+                              {(() => {
+                                const deliveryEntry = item.routeComplianceLog?.find(log => log.toStatus === 'Delivered');
+                                const tat = deliveryEntry?.tatHours;
+                                return (
+                                  <div className="flex items-center space-x-4 text-right">
+                                    {tat !== undefined ? (
+                                      <>
+                                        <div>
+                                          <div className="text-[10px] text-slate-400 font-semibold block uppercase">Measured TAT</div>
+                                          <div className="text-sm font-black font-mono text-indigo-700">{tat} <span className="text-[10px] font-medium text-slate-500 flex-1 block">hours</span></div>
+                                        </div>
+                                        <div className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                          tat <= 48 
+                                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' 
+                                            : 'bg-amber-50 text-amber-700 border border-amber-100'
+                                        }`}>
+                                          {tat <= 48 ? '🎯 SLA Compliant (<= 48h)' : '⚠️ SLA Threshold Exceeded (> 48h)'}
+                                        </div>
+                                      </>
+                                    ) : item.status === 'Cancelled' ? (
+                                      <div className="text-[10px] uppercase font-bold text-red-500 tracking-wider bg-red-50 px-2 py-1 rounded border border-red-100">
+                                        VOID / CANCELLED
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <div>
+                                          <div className="text-[10px] text-slate-400 font-semibold block uppercase">Transit Duration</div>
+                                          <div className="text-xs font-mono font-bold text-amber-600 animate-pulse">In Transit...</div>
+                                        </div>
+                                        <div className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-[10px] font-bold uppercase tracking-wider border border-blue-100 animate-pulse">
+                                          🚚 Active Route
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+
+                            {/* Steps Timeline */}
+                            <div className="space-y-4 relative before:absolute before:left-[17px] before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-100">
+                              {(!item.routeComplianceLog || item.routeComplianceLog.length === 0) ? (
+                                <div className="pl-8 py-3 text-xs text-slate-400 italic flex items-center space-x-2">
+                                  <HelpCircle className="h-4 w-4 text-slate-300" />
+                                  <span>No historical track records verified for this shipment. Real-time logging of transitions was introduced just now.</span>
+                                </div>
+                              ) : (
+                                item.routeComplianceLog.map((log, index) => {
+                                  const isDelivered = log.toStatus === 'Delivered';
+                                  const isCancelled = log.toStatus === 'Cancelled';
+                                  const isInTransit = log.toStatus === 'In Transit';
+                                  
+                                  return (
+                                    <div key={log.id || index} className="flex items-start space-x-3.5 relative">
+                                      <div className={`h-9 w-9 rounded-full flex items-center justify-center border z-10 shrink-0 ${
+                                        isDelivered 
+                                          ? 'bg-emerald-50 border-emerald-300 text-emerald-600 shadow-sm' 
+                                          : isCancelled 
+                                            ? 'bg-red-50 border-red-300 text-red-650 shadow-sm' 
+                                            : isInTransit 
+                                              ? 'bg-blue-50 border-blue-300 text-blue-600 shadow-sm' 
+                                              : 'bg-slate-50 border-slate-300 text-slate-500'
+                                      }`}>
+                                        {isDelivered ? (
+                                          <CheckCircle className="h-4 w-4" />
+                                        ) : isCancelled ? (
+                                          <AlertTriangle className="h-4 w-4" />
+                                        ) : isInTransit ? (
+                                          <Truck className="h-4 w-4" />
+                                        ) : (
+                                          <FileSignature className="h-4 w-4" />
+                                        )}
+                                      </div>
+
+                                      <div className="flex-1 bg-slate-50/60 rounded-lg p-3 hover:bg-slate-50 transition-colors border border-slate-100">
+                                        <div className="flex items-center justify-between flex-wrap gap-2 mb-1.5">
+                                          <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                                            <span className="text-[11px] font-bold text-slate-600 capitalize text-[10px]">
+                                              {log.fromStatus}
+                                            </span>
+                                            <ArrowRight className="h-3 w-3 text-slate-400" />
+                                            <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded text-[10px] ${
+                                              isDelivered ? 'bg-emerald-100 text-emerald-800' :
+                                              isCancelled ? 'bg-red-100 text-red-800' :
+                                              isInTransit ? 'bg-blue-100 text-blue-800' :
+                                              'bg-slate-200 text-slate-700'
+                                            }`}>
+                                              {log.toStatus}
+                                            </span>
+                                          </div>
+                                          <div className="text-[10px] text-slate-400 font-mono">
+                                            {new Date(log.timestamp).toLocaleDateString()} {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                          </div>
+                                        </div>
+
+                                        <p className="text-xs text-slate-600 leading-normal font-medium bg-white p-2 rounded border border-slate-200/50 shadow-2xs">
+                                          {log.remarks || `Successfully updated status to ${log.toStatus}`}
+                                        </p>
+
+                                        <div className="mt-2.5 pt-2 border-t border-slate-200/30 flex justify-between items-center text-[10px] text-slate-400">
+                                          <div>
+                                            Performed by: <span className="font-semibold text-slate-600">{log.updatedBy}</span>
+                                          </div>
+                                          {log.tatHours !== undefined && (
+                                            <div className="bg-indigo-50 text-indigo-700 font-mono px-2 py-0.5 rounded font-bold text-[10px]">
+                                              Turnaround Time (TAT): {log.tatHours} hrs
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })
               )}
@@ -608,7 +802,9 @@ export default function DOMaster({
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <div className="flex items-center space-x-2">
                 <FileSignature className="h-5 w-5 text-indigo-600" />
-                <h3 className="font-bold text-slate-800 text-base">New Despatch Order & Transit Challan</h3>
+                <h3 className="font-bold text-slate-800 text-base">
+                  {editingDO ? `Edit Despatch Order: ${editingDO.doNumber}` : 'New Despatch Order & Transit Challan'}
+                </h3>
               </div>
               <button 
                 onClick={() => setIsWizardOpen(false)}
@@ -1113,10 +1309,10 @@ export default function DOMaster({
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center space-x-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors shadow-lg shadow-indigo-600/20"
+                  className="flex items-center space-x-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-colors shadow-lg shadow-indigo-600/20 whitespace-nowrap"
                 >
                   <Check className="h-4 w-4" />
-                  <span>Issue Slip & Create Challan</span>
+                  <span>{editingDO ? 'Save & Update Despatch Order' : 'Issue Slip & Create Challan'}</span>
                 </button>
               </div>
             </form>

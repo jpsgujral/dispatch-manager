@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
   projectId: "gen-lang-client-0060353187",
@@ -12,7 +13,8 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore targeting the specific database ID created by the setup tool
+// Initialize Firestore targeting the specific database ID using standard getFirestore
 const db = getFirestore(app, "ai-studio-6a5e4293-7427-45c3-9710-a9e84638a1f4");
+const auth = getAuth(app);
 
-export { app, db };
+export { app, db, auth };

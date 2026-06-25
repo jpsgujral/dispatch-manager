@@ -9,6 +9,7 @@ interface TransporterMasterProps {
   onEditTransporter: (transporter: Transporter) => void;
   onDeleteTransporter: (id: string) => void;
   onBack?: () => void;
+  autoOpenForm?: boolean;
 }
 
 export default function TransporterMaster({
@@ -17,10 +18,17 @@ export default function TransporterMaster({
   onAddTransporter,
   onEditTransporter,
   onDeleteTransporter,
-   onBack,
+  onBack,
+  autoOpenForm = false,
 }: TransporterMasterProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTransporter, setEditingTransporter] = useState<Transporter | null>(null);
+
+  React.useEffect(() => {
+    if (autoOpenForm) {
+      openAddModal();
+    }
+  }, [autoOpenForm]);
   
   // Safe confirmation state
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
@@ -248,7 +256,7 @@ export default function TransporterMaster({
 
       {/* Write / Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-800 text-base">
@@ -262,7 +270,7 @@ export default function TransporterMaster({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
                   Transporter Representative / Agency Name <span className="text-red-500">*</span>

@@ -1,21 +1,39 @@
 import React, { useState } from 'react';
 import { SourceLocation, DespatchOrder } from '../types';
-import { MapPin, Plus, Search, Trash2, Calendar, Hash, FileSpreadsheet } from 'lucide-react';
+import { MapPin, Plus, Search, Trash2, Calendar, Hash, FileSpreadsheet, Edit, X } from 'lucide-react';
 
 interface SourceMasterProps {
   sources: SourceLocation[];
   onAddSource: (name: string, pincode: string) => void;
+  onEditSource: (src: SourceLocation) => void;
   onDeleteSource: (id: string) => void;
   dos: DespatchOrder[];
   onBack?: () => void;
 }
 
-export default function SourceMaster({ sources, onAddSource, onDeleteSource, dos, onBack }: SourceMasterProps) {
+export default function SourceMaster({ sources, onAddSource, onEditSource, onDeleteSource, dos, onBack }: SourceMasterProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [newSourceName, setNewSourceName] = useState('');
   const [newSourcePincode, setNewSourcePincode] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [editingSource, setEditingSource] = useState<SourceLocation | null>(null);
+
+  const startEditSource = (src: SourceLocation) => {
+    setEditingSource(src);
+    setNewSourceName(src.name);
+    setNewSourcePincode(src.pincode);
+    setError('');
+    setSuccess('');
+  };
+
+  const cancelEditSource = () => {
+    setEditingSource(null);
+    setNewSourceName('');
+    setNewSourcePincode('');
+    setError('');
+    setSuccess('');
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +58,7 @@ export default function SourceMaster({ sources, onAddSource, onDeleteSource, dos
 
     // Check duplicate
     const isDuplicate = sources.some(
-      (s) => s.name.toLowerCase() === newSourceName.trim().toLowerCase()
+      (s) => (s.name || '').toLowerCase() === newSourceName.trim().toLowerCase() && (!editingSource || s.id !== editingSource.id)
     );
 
     if (isDuplicate) {
@@ -48,8 +66,18 @@ export default function SourceMaster({ sources, onAddSource, onDeleteSource, dos
       return;
     }
 
-    onAddSource(newSourceName.trim(), newSourcePincode.trim());
-    setSuccess(`Source "${newSourceName.trim()}" successfully registered!`);
+    if (editingSource) {
+      onEditSource({
+        ...editingSource,
+        name: newSourceName.trim(),
+        pincode: newSourcePincode.trim(),
+      });
+      setSuccess(`Source "${newSourceName.trim()}" successfully updated!`);
+      setEditingSource(null);
+    } else {
+      onAddSource(newSourceName.trim(), newSourcePincode.trim());
+      setSuccess(`Source "${newSourceName.trim()}" successfully registered!`);
+    }
     
     // Clear inputs
     setNewSourceName('');
@@ -105,8 +133,18 @@ export default function SourceMaster({ sources, onAddSource, onDeleteSource, dos
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Register New Source Form */}
         <div className="bg-white border border-[#D1D1CF] p-5 shadow-xs h-fit space-y-4">
-          <h2 className="text-xs font-mono font-extrabold uppercase tracking-widest text-[#E65100] border-b border-[#D1D1CF] pb-2">
-            🆕 Register origin loading source
+          <h2 className="text-xs font-mono font-extrabold uppercase tracking-widest text-[#E65100] border-b border-[#D1D1CF] pb-2 flex justify-between items-center">
+            <span>{editingSource ? '📝 Edit Loading Source' : '🆕 Register origin loading source'}</span>
+            {editingSource && (
+              <button
+                type="button"
+                onClick={cancelEditSource}
+                className="text-stone-400 hover:text-red-500 font-sans normal-case text-[10px] font-bold inline-flex items-center space-x-0.5 cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+                <span>Cancel</span>
+              </button>
+            )}
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -161,7 +199,7 @@ export default function SourceMaster({ sources, onAddSource, onDeleteSource, dos
               type="submit"
               className="w-full py-2.5 bg-stone-900 border border-black hover:bg-[#E65100] hover:border-[#E65100] text-white text-xs font-mono uppercase tracking-widest font-extrabold transition-all cursor-pointer shadow-sm select-none"
             >
-              Add Source to Master
+              {editingSource ? 'Update Source Details' : 'Add Source to Master'}
             </button>
           </form>
         </div>
@@ -233,28 +271,38 @@ export default function SourceMaster({ sources, onAddSource, onDeleteSource, dos
                           {source.createdAt}
                         </td>
                         <td className="px-4 py-3.5 text-center">
-                          {doCount > 0 ? (
+                          <div className="flex items-center justify-center space-x-1 whitespace-nowrap">
                             <button
-                              disabled
-                              title="Cannot delete source location linked to existing despatch orders"
-                              className="text-stone-300 cursor-not-allowed p-1"
+                              type="button"
+                              onClick={() => startEditSource(source)}
+                              className="p-1 text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 transition-all text-center rounded-none cursor-pointer"
+                              title="Edit Source Details"
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Edit className="h-4 w-4" />
                             </button>
-                          ) : (
-                            <button
-                              id={`delete-source-${source.id}`}
-                              onClick={() => {
-                                if (window.confirm(`Are you sure you want to remove "${source.name}" from the Source Master?`)) {
-                                  onDeleteSource(source.id);
-                                }
-                              }}
-                              className="text-stone-400 hover:text-red-600 transition-colors p-1 cursor-pointer"
-                              title="Delete source location"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          )}
+                            {doCount > 0 ? (
+                              <button
+                                disabled
+                                title="Cannot delete source location linked to existing despatch orders"
+                                className="text-stone-300 cursor-not-allowed p-1"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            ) : (
+                              <button
+                                id={`delete-source-${source.id}`}
+                                onClick={() => {
+                                  if (window.confirm(`Are you sure you want to remove "${source.name}" from the Source Master?`)) {
+                                    onDeleteSource(source.id);
+                                  }
+                                }}
+                                className="text-stone-400 hover:text-red-600 transition-colors p-1 cursor-pointer"
+                                title="Delete source location"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

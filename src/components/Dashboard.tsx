@@ -1,686 +1,344 @@
 import React from 'react';
-import { Company, Vendor, Transporter, Agent, PurchaseOrder, DespatchOrder } from '../types';
-import { getCommissionLogic } from '../data';
+import { Company, DespatchOrder, Transporter, AppUser } from '../types';
+import TSGLogo from './TSGLogo';
 import { 
-  Building, 
-  Users, 
-  Truck, 
-  UserSquare2, 
-  FileCheck, 
-  TrendingUp, 
-  CircleDollarSign, 
-  Scale, 
-  Inbox,
-  Clock,
-  ArrowRight,
-  Sparkles,
-  Search,
-  X,
-  FileText,
-  Download
+  Menu,
+  Home,
+  Gauge,
+  MessageCircle,
+  Moon,
+  Sun,
+  LogOut
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell
+} from 'recharts';
 
 interface DashboardProps {
   companies: Company[];
-  vendors: Vendor[];
-  transporters: Transporter[];
-  agents: Agent[];
-  pos: PurchaseOrder[];
   dos: DespatchOrder[];
-  onNavigate: (tab: string) => void;
-  onSelectChallan?: (doItem: DespatchOrder) => void;
-  onUpdateReceivedWeight?: (
-    id: string, 
-    receivedWeight: number | null, 
-    remarks?: string,
-    deliveryDocUrl?: string,
-    deliveryDocName?: string,
-    status?: 'In Transit' | 'Delivered' | 'Cancelled'
-  ) => void;
+  transporters: Transporter[];
+  onToggleSidebar: () => void;
+  onTriggerQuickAction: (action: 'do' | 'po' | 'vendor' | 'transporter') => void;
+  currentUser?: AppUser | null;
+  themeMode?: 'light' | 'dark';
+  onToggleTheme?: () => void;
+  onLogout?: () => void;
 }
 
 export default function Dashboard({
   companies,
-  vendors,
-  transporters,
-  agents,
-  pos,
-  dos,
-  onNavigate,
-  onSelectChallan,
-  onUpdateReceivedWeight,
+  dos = [],
+  transporters = [],
+  onToggleSidebar,
+  onTriggerQuickAction,
+  currentUser,
+  themeMode = 'light',
+  onToggleTheme,
+  onLogout,
 }: DashboardProps) {
 
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [selectedTransitIds, setSelectedTransitIds] = React.useState<string[]>([]);
+  // Sort dispatch orders by createdAt descending (newest first) and take the last 5 created
+  const recentDos = [...dos]
+    .sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime())
+    .slice(0, 5);
 
-  const handleBulkDeliver = () => {
-    if (selectedTransitIds.length === 0) return;
-    if (onUpdateReceivedWeight) {
-      if (confirm(`Are you sure you want to change the status of ${selectedTransitIds.length} selected transit orders to "Delivered"? This will also copy their Loaded Weight to Received Weight by default to enable accurate commission calculations.`)) {
-        selectedTransitIds.forEach(id => {
-          const item = dos.find(d => d.id === id);
-          if (item) {
-            const finalReceived = item.receivedWeight !== null ? item.receivedWeight : item.loadedWeight;
-            onUpdateReceivedWeight(id, finalReceived, item.remarks || '', item.deliveryDocUrl || '', item.deliveryDocName || '', 'Delivered');
-          }
-        });
-        setSelectedTransitIds([]);
+  const currentYear = new Date().getFullYear();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Initialize the 12 months with 0 tonnage
+  const monthlyDataMap = monthNames.map((name, index) => ({
+    monthIndex: index,
+    name,
+    tonnage: 0,
+  }));
+
+  dos.forEach(doItem => {
+    // Suppress typescript warning by parsing reliably
+    const itemDate = doItem.date ? new Date(doItem.date) : (doItem.createdAt ? new Date(doItem.createdAt) : null);
+    if (itemDate && !isNaN(itemDate.getTime())) {
+      const year = itemDate.getFullYear();
+      if (year === currentYear && doItem.status !== 'Cancelled') {
+        const month = itemDate.getMonth(); // 0 to 11
+        const weight = doItem.receivedWeight !== null 
+          ? doItem.receivedWeight 
+          : (doItem.loadedWeight !== null ? doItem.loadedWeight : 0);
+        if (month >= 0 && month < 12) {
+          monthlyDataMap[month].tonnage += weight;
+        }
       }
-    }
-  };
-
-  const handleExportCSV = () => {
-    // CSV Headers
-    const headers = [
-      'DO Number',
-      'Date',
-      'Status',
-      'Vehicle/Bulker Number',
-      'Driver Name',
-      'Driver Phone',
-      'Dispatch Plant',
-      'Loaded Weight (MT)',
-      'Received Weight (MT)',
-      'Transporter Name',
-      'Transporter Rate (INR)',
-      'Purchase Order #',
-      'Commodity Type',
-      'Vendor Name',
-      'Commission Agent Name',
-      'Agent Commission (INR)',
-      'Invoice No',
-      'Invoice Received',
-      'Remarks'
-    ];
-
-    const rows = dos.map(d => {
-      const po = pos.find(p => p.id === d.poId);
-      const vendor = po ? vendors.find(v => v.id === po.vendorId) : null;
-      const transporter = transporters.find(t => t.id === d.transporterId);
-      const agent = d.agentId ? agents.find(a => a.id === d.agentId) : null;
-      
-      let commissionVal = '0.00';
-      if (po && d.receivedWeight !== null) {
-        const math = getCommissionLogic(po.vendorRate, d.transporterRate, d.receivedWeight);
-        commissionVal = math.totalCommission.toFixed(2);
-      }
-
-      const values = [
-        d.doNumber || '',
-        d.date || '',
-        d.status || '',
-        d.vehicleNumber || '',
-        d.driverName || '',
-        d.driverPhone || '',
-        d.vendorPlant || '',
-        d.loadedWeight !== null ? d.loadedWeight.toString() : '',
-        d.receivedWeight !== null ? d.receivedWeight.toString() : '',
-        transporter ? transporter.name : 'N/A',
-        d.transporterRate !== null ? d.transporterRate.toString() : '',
-        po ? po.poNumber : 'N/A',
-        po ? po.material : 'N/A',
-        vendor ? vendor.name : 'N/A',
-        agent ? agent.name : 'N/A',
-        commissionVal,
-        d.invoiceNo || '',
-        d.invoiceReceived ? 'Yes' : 'No',
-        d.remarks || ''
-      ];
-
-      return values.map(val => {
-        const escaped = ('' + val).replace(/"/g, '""');
-        return `"${escaped}"`;
-      }).join(',');
-    });
-
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `despatch_orders_archive_${new Date().toISOString().slice(0,10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const filteredDos = React.useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return [];
-
-    return dos.filter(item => {
-      const doNum = (item.doNumber || '').toLowerCase();
-      const vehicleNum = (item.vehicleNumber || '').toLowerCase();
-      
-      const transporter = transporters.find(t => t.id === item.transporterId);
-      const transporterName = transporter ? transporter.name.toLowerCase() : '';
-
-      return doNum.includes(query) || vehicleNum.includes(query) || transporterName.includes(query);
-    });
-  }, [searchQuery, dos, transporters]);
-
-  // Global calculations
-  const totalLMT = dos.reduce((sum, item) => sum + (item.loadedWeight ?? 0), 0);
-  const totalRMT = dos.reduce((sum, item) => sum + (item.receivedWeight ?? 0), 0);
-  const pendingWeighmentsCount = dos.filter(item => item.receivedWeight === null && item.status !== 'Cancelled').length;
-  
-  let totalCommissionsPaid = 0;
-  let totalGrossProfitValue = 0;
-  let netCompanyEarnings = 0;
-  let flyAshMT = 0;
-  let ggbsMT = 0;
-  let silicaMT = 0;
-
-  dos.forEach(item => {
-    if (item.status === 'Cancelled') return;
-    
-    const po = pos.find(p => p.id === item.poId);
-    if (!po) return;
-
-    // Track material volumes
-    const effectiveWeight = item.receivedWeight ?? (item.loadedWeight ?? 0);
-    if (po.material === 'Fly Ash') flyAshMT += effectiveWeight;
-    else if (po.material === 'GGBS') ggbsMT += effectiveWeight;
-    else if (po.material === 'Micro Silica') silicaMT += effectiveWeight;
-
-    // Track financial math (using receivedWeight for delivered items, or temporary gross calculation for transit if desired)
-    // The prompt says commission is paid on received weight. Let's strictly calculate commission for "received weight" records
-    if (item.receivedWeight !== null) {
-      const math = getCommissionLogic(po.vendorRate, item.transporterRate, item.receivedWeight);
-      totalGrossProfitValue += math.totalGrossProfit;
-      if (item.agentId) {
-        totalCommissionsPaid += math.totalCommission;
-      }
-      netCompanyEarnings += math.netCompanyProfit;
     }
   });
 
-  const materialDistribution = [
-    { name: 'Fly Ash Powder', value: flyAshMT, color: 'bg-slate-500', barColor: 'indigo' },
-    { name: 'GGBS Granules', value: ggbsMT, color: 'bg-emerald-600', barColor: 'emerald' },
-    { name: 'Micro Silica', value: silicaMT, color: 'bg-indigo-600', barColor: 'blue' },
-  ];
+  // Format tonnage to 1 decimal place or keep as number
+  const chartData = monthlyDataMap.map(item => ({
+    name: item.name,
+    Tonnage: parseFloat(item.tonnage.toFixed(1)),
+  }));
 
-  const maxMaterialVol = Math.max(...materialDistribution.map(m => m.value), 1);
+  // Statistics
+  const totalYtd = chartData.reduce((sum, item) => sum + item.Tonnage, 0);
+  const avgMonthly = totalYtd / 12;
 
   return (
-    <div id="dashboard-tab" className="space-y-8 animate-fade-in">
-      
-      {/* Welcome Banner */}
-      <div className="bg-[#1A1A1A] text-white rounded-none p-8 border border-black relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-[#E65100]/5 pointer-events-none"></div>
-        <div className="space-y-3 z-10">
-          <div className="inline-flex items-center space-x-2 bg-[#E65100]/20 text-[#E65100] px-3 py-1 rounded-none text-xs font-bold uppercase tracking-widest border border-[#E65100]">
-            <Sparkles className="h-3 w-3" />
-            <span>The Fly Ash People</span>
-          </div>
-          <h1 className="text-3xl font-serif font-bold italic tracking-tight">
-            {companies[0]?.name || 'Sardar & Apex Bulker Logistics'}
+    <div className="w-full flex-1 flex flex-col justify-between p-4 md:p-8 select-none transition-all duration-300">
+
+      {/* Main Centered Content Section (Bento Grid) */}
+      <div className="flex-1 flex flex-col items-center justify-center py-4 text-center space-y-6 w-full">
+        <div className="relative group transition-transform duration-300 transform hover:scale-105">
+          {/* Subtle concentric frames */}
+          <div className="absolute -inset-4 border border-dashed border-[#D1D1CF]/40 rounded-full animate-[spin_20s_linear_infinite]" />
+          <div className="absolute -inset-8 border border-stone-200/50 rounded-full" />
+          <TSGLogo size={120} className="border-[4px] border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] rounded-xl relative z-10 bg-white" />
+        </div>
+
+        <div className="space-y-4 max-w-full">
+          <h1 className={`text-xl sm:text-2xl md:text-3xl lg:text-4xl font-serif font-black italic tracking-tight leading-none truncate max-w-full px-4 ${
+            themeMode === 'dark' ? 'text-white' : 'text-neutral-900'
+          }`} title={companies[0]?.name || 'TSG Impex India'}>
+            {companies[0]?.name || 'TSG Impex India'}
           </h1>
-          <p className="text-neutral-300 text-sm max-w-xl font-sans leading-relaxed">
-            Real-time management ledger for Fly Ash, GGBS, and Micro Silica logistics. Monitor contracted PO quantities, trigger dispatch orders, audit agent commission payouts, and export instant Challans.
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0 z-10 w-full md:w-auto">
-          <button
-            id="export-csv-btn"
-            onClick={handleExportCSV}
-            className="flex items-center justify-center space-x-2 px-5 py-3 border border-neutral-600 bg-neutral-800 hover:bg-neutral-700 text-white font-serif italic text-sm transition-all whitespace-nowrap cursor-pointer"
-          >
-            <Download className="h-4 w-4 text-[#E65100]" />
-            <span>Export Despatch Ledger (.CSV)</span>
-          </button>
-
-          <button
-            id="quick-despatch-btn"
-            onClick={() => onNavigate('dispatch')}
-            className="flex items-center justify-center space-x-2 px-6 py-3 bg-[#E65100] hover:bg-white hover:text-black hover:border-black border border-[#E65100] text-white font-serif italic text-sm transition-all whitespace-nowrap cursor-pointer"
-          >
-            <span>Issue New Despatch</span>
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Global Search Console */}
-      <div className="bg-white p-6 border border-[#D1D1CF] rounded-none space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xs uppercase tracking-[0.2em] font-bold text-[#1A1A1A]">Global Despatch Search</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Find any Despatch Order or Transit Challan instantly by DO number, Transporter name, or Bulker/Vehicle plate number.
-            </p>
-          </div>
-          <div className="relative w-full md:max-w-md">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-              <Search className="h-4 w-4" />
-            </span>
-            <input
-              id="global-search-input"
-              type="text"
-              placeholder="Search DO#, transporter name, or vehicle number..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-10 py-2.5 bg-neutral-50 text-[#1A1A1A] text-sm border border-[#D1D1CF] focus:outline-hidden focus:border-[#E65100] focus:ring-1 focus:ring-[#E65100] transition-all rounded-none placeholder:text-slate-400 placeholder:italic"
-            />
-            {searchQuery && (
-              <button
-                id="clear-search-btn"
-                onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-black cursor-pointer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+          <div className="flex items-center justify-center space-x-3">
+            <span className="h-[2px] w-8 bg-[#E65100]" />
+            <h2 className="text-xs uppercase tracking-[0.3em] font-sans font-extrabold text-[#E65100]">
+              The Fly Ash People
+            </h2>
+            <span className="h-[2px] w-8 bg-[#E65100]" />
           </div>
         </div>
 
-        {/* Search Results Drawer */}
-        {searchQuery.trim() !== '' && (
-          <div className="mt-4 pt-4 border-t border-[#F4F4F1] animate-fade-in space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-serif italic text-neutral-600">
-                Found <strong className="text-black font-semibold font-sans">{filteredDos.length}</strong> match{filteredDos.length === 1 ? '' : 'es'} for "{searchQuery}"
-              </span>
-              <button
-                onClick={() => setSearchQuery('')}
-                className="text-xs text-[#E65100] hover:underline font-serif italic cursor-pointer"
-              >
-                Clear Search
-              </button>
-            </div>
-
-            {filteredDos.length === 0 ? (
-              <div className="py-8 text-center border border-dashed border-[#D1D1CF] text-slate-500 rounded-none bg-neutral-50">
-                <Inbox className="h-6 w-6 mx-auto text-slate-300 mb-2" />
-                <p className="text-xs font-serif italic">No matching despatch orders found.</p>
-                <p className="text-[10px] text-slate-400 mt-1">Please edit your query or check for typo errors.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto border border-[#D1D1CF]">
-                <table className="w-full text-left border-collapse bg-white text-xs">
-                  <thead className="bg-[#1A1A1A] text-white uppercase tracking-wider text-[10px] font-sans">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">DO Number / Date</th>
-                      <th className="px-4 py-3 font-semibold">Transporter / Vehicle</th>
-                      <th className="px-4 py-3 font-semibold">Destination / Plant</th>
-                      <th className="px-4 py-3 font-semibold text-right">Tonnage (MT)</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                      <th className="px-4 py-3 font-semibold text-center">Challan Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#F4F4F1]">
-                    {filteredDos.map((item) => {
-                      const t = transporters.find(trans => trans.id === item.transporterId);
-                      const po = pos.find(p => p.id === item.poId);
-                      const effectiveWeight = item.receivedWeight !== null ? item.receivedWeight : item.loadedWeight;
-
-                      return (
-                        <tr key={item.id} className="hover:bg-neutral-50 transition-colors">
-                          <td className="px-4 py-3.5">
-                            <div className="font-bold text-[#1A1A1A] font-mono">{item.doNumber}</div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">{item.date}</div>
-                          </td>
-                          <td className="px-4 py-3.5 flex flex-col items-start">
-                            <div className="font-semibold text-zinc-900">{t?.name || 'Unknown Transporter'}</div>
-                            <div className="font-bold text-[10px] text-neutral-800 bg-neutral-100 px-1.5 py-0.5 border border-[#D1D1CF] inline-block font-mono mt-1 uppercase">
-                              {item.vehicleNumber}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <div className="font-semibold text-zinc-900">{item.vendorPlant}</div>
-                            {po && (
-                              <div className="text-[10px] text-slate-500 mt-0.5 italic">
-                                PO: {po.poNumber} &bull; <span className="text-[#E65100] font-sans font-medium">{po.material}</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5 text-right font-mono font-semibold">
-                            <div>{effectiveWeight !== null ? `${effectiveWeight.toFixed(2)} MT` : 'Pending'}</div>
-                            {item.receivedWeight !== null && (
-                              <div className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 inline-block px-1 mt-0.5">
-                                Verified Weighment
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={`inline-block px-2.5 py-0.5 font-sans font-bold uppercase tracking-wider text-[9px] border ${
-                              item.status === 'Cancelled'
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : item.status === 'Delivered'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-amber-50 text-amber-700 border-amber-200'
-                            }`}>
-                              {item.status}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-center">
-                            <div className="flex items-center justify-center space-x-2">
-                              {onSelectChallan && (
-                                <button
-                                  id={`search-item-challan-${item.id}`}
-                                  onClick={() => onSelectChallan(item)}
-                                  className="px-2.5 py-1.5 bg-[#E65100] hover:bg-black text-white rounded-none font-serif italic text-[11px] transition-all cursor-pointer font-medium flex items-center space-x-1"
-                                >
-                                  <FileText className="h-3.5 w-3.5" />
-                                  <span>Preview & Print PDF</span>
-                                </button>
-                              )}
-                              <button
-                                id={`search-item-edit-${item.id}`}
-                                onClick={() => {
-                                  onNavigate('dispatch');
-                                }}
-                                className="px-2.5 py-1.5 border border-[#D1D1CF] hover:bg-neutral-900 hover:text-white rounded-none font-serif italic text-[11px] transition-all cursor-pointer font-medium"
-                              >
-                                Edit / View in Registry
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Primary KPI Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        
-        {/* KPI: Total Tonnage */}
-        <div className="bg-white rounded-none p-6 border border-[#D1D1CF] flex flex-col justify-between">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-[#888884] font-semibold">Total Tonnage Shipped</p>
-            <p className="text-4xl font-serif text-[#1A1A1A] mt-2">
-              {totalLMT.toFixed(2)} <span className="text-xs font-sans text-[#888884]">MT</span>
-            </p>
-          </div>
-          <div className="mt-4 pt-2 border-t border-[#F4F4F1] flex justify-between items-center text-xs text-slate-500">
-            <span>Delivered weight:</span>
-            <span className="font-mono font-bold text-black">{totalRMT.toFixed(2)} MT</span>
-          </div>
-        </div>
-
-        {/* KPI: Net Company Profit */}
-        <div className="bg-white rounded-none p-6 border border-[#D1D1CF] flex flex-col justify-between">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-[#888884] font-semibold">Net Company Profit</p>
-            <p className="text-4xl font-serif text-[#1A1A1A] mt-2 font-bold">
-              ₹ {Math.round(netCompanyEarnings).toLocaleString('en-IN')}
-            </p>
-          </div>
-          <div className="mt-4 pt-2 border-t border-[#F4F4F1] flex justify-between items-center text-xs text-slate-500">
-            <span>Gross Profit:</span>
-            <span className="font-mono text-emerald-800 font-bold">₹{Math.round(totalGrossProfitValue).toLocaleString('en-IN')}</span>
-          </div>
-        </div>
-
-        {/* KPI: Active Agent Commissions */}
-        <div className="bg-white rounded-none p-6 border border-[#D1D1CF] flex flex-col justify-between">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-[#888884] font-semibold">Agent Commissions Pending</p>
-            <p className="text-4xl font-serif text-[#E65100] mt-2">
-              ₹ {Math.round(totalCommissionsPaid).toLocaleString('en-IN')}
-            </p>
-          </div>
-          <div className="mt-4 pt-2 border-t border-[#F4F4F1] text-[11px] text-slate-500 italic">
-            Calculated over actual delivered tons
-          </div>
-        </div>
-
-        {/* KPI: Weight Weighments Pending */}
-        <div className="bg-[#1A1A1A] text-white rounded-none p-6 flex flex-col justify-between">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Weighments In Transit</p>
-            <p className="text-4xl font-serif mt-2 font-bold text-[#E65100]">{pendingWeighmentsCount}</p>
-          </div>
-          <div className="mt-4 pt-2 border-t border-neutral-800 text-[11px] text-neutral-400">
-            Active bulkers on delivery path
-          </div>
-        </div>
-
-      </div>
-
-      {/* Main Layout Divided Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
-        {/* Left 2 Columns: Material Split & Masters Summary */}
-        <div className="lg:col-span-2 space-y-6">
+        {/* 2-Column Bento Grid: Tonnage Trend on left, Recent Activity on right */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full max-w-6xl mx-auto mt-6 shrink-0 text-left">
           
-          {/* Material Volumes Chart */}
-          <div className="bg-white p-6 rounded-none border border-[#D1D1CF]">
-            <h3 className="text-xs uppercase tracking-[0.2em] font-bold text-[#1A1A1A] mb-1">Material Volume Distribution (MT)</h3>
-            <p className="text-xs text-slate-500 mb-6">Aggregate dry-power transport loads processed across all dispatches.</p>
-            
-            <div className="space-y-5">
-              {materialDistribution.map((item) => {
-                const pct = Math.max(8, (item.value / maxMaterialVol) * 100);
-                return (
-                  <div key={item.name} className="space-y-2">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-serif italic text-sm text-[#1A1A1A]">{item.name}</span>
-                      <strong className="font-mono text-xs text-[#1A1A1A] bg-[#F4F4F1] px-2.5 py-0.5 border border-[#D1D1CF]">
-                        {item.value.toFixed(2)} MT
-                      </strong>
-                    </div>
-                    <div className="h-2 w-full bg-[#F4F4F1] rounded-none overflow-hidden">
-                      <div 
-                        className="h-full bg-[#E65100] transition-all duration-1000" 
-                        style={{ width: `${pct}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Masters counts grid */}
-          <div className="bg-white p-6 rounded-none border border-[#D1D1CF]">
-            <h3 className="text-xs uppercase tracking-[0.2em] font-bold text-[#1A1A1A] mb-5">Master Registry Inventories</h3>
-            
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <button 
-                onClick={() => onNavigate('company')}
-                className="p-4 rounded-none border border-[#D1D1CF] bg-[#F9F8F6] hover:bg-[#F4F4F1] text-left transition-colors cursor-pointer group"
-              >
-                <div className="h-8 w-8 bg-[#1A1A1A] text-white flex items-center justify-center mb-3">
-                  <Building className="h-4 w-4" />
+          {/* Left Column: Tonnage Trend Chart Widget */}
+          <div className={`lg:col-span-7 border-[3px] p-5 transition-all duration-300 flex flex-col justify-between ${
+            themeMode === 'dark' 
+              ? 'bg-[#12141a] border-slate-800 text-slate-100 shadow-[5px_5px_0px_0px_rgba(66,165,245,0.3)]' 
+              : 'bg-white border-black text-[#1A1A1A] shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]'
+          }`}>
+            <div>
+              <div className={`flex items-center justify-between border-b-[2px] pb-3 mb-4 ${
+                themeMode === 'dark' ? 'border-slate-800' : 'border-black'
+              }`}>
+                <div className="flex items-center space-x-2">
+                  <span className="h-2.5 w-2.5 bg-[#E65100] shrink-0 inline-block" />
+                  <h3 className={`font-serif font-extrabold italic text-xs md:text-sm tracking-wide uppercase ${
+                    themeMode === 'dark' ? 'text-white' : 'text-neutral-900'
+                  }`}>
+                    Annual despatch volume ({currentYear})
+                  </h3>
                 </div>
-                <p className="text-[10px] font-bold text-[#888884] uppercase tracking-wider">Company</p>
-                <p className="text-2xl font-serif text-black mt-1">{companies.length}</p>
-                <span className="text-[10px] text-[#E65100] font-serif italic group-hover:underline mt-2 inline-block">Edit Ledger →</span>
-              </button>
-
-              <button 
-                onClick={() => onNavigate('vendor')}
-                className="p-4 rounded-none border border-[#D1D1CF] bg-[#F9F8F6] hover:bg-[#F4F4F1] text-left transition-colors cursor-pointer group"
-              >
-                <div className="h-8 w-8 bg-[#1A1A1A] text-white flex items-center justify-center mb-3">
-                  <Users className="h-4 w-4" />
-                </div>
-                <p className="text-[10px] font-bold text-[#888884] uppercase tracking-wider">Vendors</p>
-                <p className="text-2xl font-serif text-black mt-1">{vendors.length}</p>
-                <span className="text-[10px] text-[#E65100] font-serif italic group-hover:underline mt-2 inline-block">Edit Ledger →</span>
-              </button>
-
-              <button 
-                onClick={() => onNavigate('transporter')}
-                className="p-4 rounded-none border border-[#D1D1CF] bg-[#F9F8F6] hover:bg-[#F4F4F1] text-left transition-colors cursor-pointer group"
-              >
-                <div className="h-8 w-8 bg-[#E65100] text-white flex items-center justify-center mb-3">
-                  <Truck className="h-4 w-4" />
-                </div>
-                <p className="text-[10px] font-bold text-[#888884] uppercase tracking-wider">Transports</p>
-                <p className="text-2xl font-serif text-black mt-1">{transporters.length}</p>
-                <span className="text-[10px] text-[#E65100] font-serif italic group-hover:underline mt-2 inline-block">Edit Ledger →</span>
-              </button>
-
-              <button 
-                onClick={() => onNavigate('agent')}
-                className="p-4 rounded-none border border-[#D1D1CF] bg-[#F9F8F6] hover:bg-[#F4F4F1] text-left transition-colors cursor-pointer group"
-              >
-                <div className="h-8 w-8 bg-[#1A1A1A] text-white flex items-center justify-center mb-3">
-                  <UserSquare2 className="h-4 w-4" />
-                </div>
-                <p className="text-[10px] font-bold text-[#888884] uppercase tracking-wider">Brokers</p>
-                <p className="text-2xl font-serif text-black mt-1">{agents.length}</p>
-                <span className="text-[10px] text-[#E65100] font-serif italic group-hover:underline mt-2 inline-block">Edit Ledger →</span>
-              </button>
-
-              <button 
-                onClick={() => onNavigate('po')}
-                className="p-4 rounded-none border border-[#D1D1CF] bg-[#F9F8F6] hover:bg-[#F4F4F1] text-left transition-colors cursor-pointer group col-span-2 md:col-span-1"
-              >
-                <div className="h-8 w-8 bg-[#1A1A1A] text-white flex items-center justify-center mb-3">
-                  <FileCheck className="h-4 w-4" />
-                </div>
-                <p className="text-[10px] font-bold text-[#888884] uppercase tracking-wider">Active POs</p>
-                <p className="text-2xl font-serif text-black mt-1">{pos.length}</p>
-                <span className="text-[10px] text-[#E65100] font-serif italic group-hover:underline mt-2 inline-block">Edit Ledger →</span>
-              </button>
-            </div>
-          </div>
-
-        </div>
-
-        {/* Right Column: Live In-Transit Monitor */}
-        <div className="space-y-6">
-          
-          {/* Ongoing Transits list */}
-          <div className="bg-white p-6 rounded-none border border-[#D1D1CF] flex flex-col h-full">
-            <div className="flex justify-between items-center mb-2 border-b border-[#F4F4F1] pb-3">
-              <h3 className="text-xs uppercase tracking-[0.1em] font-bold text-[#1A1A1A]">Transit Bulkers</h3>
-              <div className="flex items-center space-x-2">
-                <span className="text-[10px] bg-[#E65100] text-white px-2 py-0.5 rounded-none font-mono font-bold uppercase">
-                  {dos.filter(item => item.status === 'In Transit').length} Active
+                <span className={`font-mono text-[9px] font-bold px-2 py-0.5 uppercase tracking-wide border ${
+                  themeMode === 'dark' 
+                    ? 'text-slate-300 bg-slate-800/60 border-slate-700' 
+                    : 'text-neutral-500 bg-neutral-100 border-neutral-200'
+                }`}>
+                  Tonnage Trend (MT)
                 </span>
               </div>
-            </div>
 
-            {/* Select All Toggle & Bulk Actions Box */}
-            {dos.filter(item => item.status === 'In Transit').length > 0 && (
-              <div className="flex flex-col gap-2 mb-4">
-                <div className="flex items-center justify-between text-xs py-1 text-slate-500">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input 
-                      type="checkbox"
-                      checked={
-                        dos.filter(item => item.status === 'In Transit').length > 0 &&
-                        dos.filter(item => item.status === 'In Transit').every(item => selectedTransitIds.includes(item.id))
-                      }
-                      onChange={(e) => {
-                        const inTransitItems = dos.filter(item => item.status === 'In Transit');
-                        if (e.target.checked) {
-                          setSelectedTransitIds(inTransitItems.map(item => item.id));
-                        } else {
-                          setSelectedTransitIds([]);
-                        }
-                      }}
-                      className="h-3.5 w-3.5 text-[#E65100] border-[#D1D1CF] focus:ring-[#E65100] accent-[#E65100]"
-                    />
-                    <span className="text-[11px] font-medium text-slate-600">Select All In Transit</span>
-                  </label>
-                  {selectedTransitIds.length > 0 && (
-                    <button
-                      onClick={() => setSelectedTransitIds([])}
-                      className="text-[10px] text-slate-400 hover:text-black underline cursor-pointer"
-                    >
-                      Deselect All ({selectedTransitIds.length})
-                    </button>
-                  )}
+              {/* Chart Stats Row */}
+              <div className={`grid grid-cols-2 gap-4 mb-3 p-2.5 font-mono border ${
+                themeMode === 'dark' 
+                  ? 'bg-slate-900/60 border-slate-800 text-slate-300' 
+                  : 'bg-stone-50 border-stone-200 text-[#1A1A1A]'
+              }`}>
+                <div>
+                  <span className={`text-[9px] uppercase block font-semibold leading-none mb-1 ${
+                    themeMode === 'dark' ? 'text-slate-400' : 'text-stone-500'
+                  }`}>Total Year-To-Date</span>
+                  <span className={`text-xs sm:text-sm font-black ${
+                    themeMode === 'dark' ? 'text-white' : 'text-neutral-900'
+                  }`}>{totalYtd.toLocaleString()} MT</span>
                 </div>
-
-                {selectedTransitIds.length > 0 && (
-                  <div className="bg-[#FFF8E1] p-3 border border-[#FFE082] flex flex-col gap-2 transition-all">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center space-x-1.5 text-amber-900">
-                        <span className="font-bold font-mono bg-amber-200 px-1.5 py-0.5">
-                          {selectedTransitIds.length}
-                        </span>
-                        <span>Bulkers Selected</span>
-                      </div>
-                    </div>
-                    <button
-                      id="bulk-deliver-btn"
-                      onClick={handleBulkDeliver}
-                      className="w-full text-center py-2 bg-[#E65100] text-white hover:bg-[#c64500] font-serif italic text-xs font-bold transition-all shadow-xs cursor-pointer animate-pulse"
-                    >
-                      Bulk Deliver Selected ({selectedTransitIds.length})
-                    </button>
-                  </div>
-                )}
+                <div>
+                  <span className={`text-[9px] uppercase block font-semibold leading-none mb-1 ${
+                    themeMode === 'dark' ? 'text-slate-400' : 'text-stone-500'
+                  }`}>Monthly average</span>
+                  <span className="text-xs sm:text-sm font-black text-[#E65100]">{avgMonthly.toFixed(1)} MT</span>
+                </div>
               </div>
-            )}
-            
-            <div className="space-y-4 divide-y divide-[#F4F4F1] overflow-y-auto max-h-[380px] -mx-2 pr-2">
-              {dos.filter(item => item.status === 'In Transit').length === 0 ? (
-                <div className="py-12 text-center text-[#888884] space-y-2">
-                  <Inbox className="h-8 w-8 mx-auto text-[#D1D1CF]" />
-                  <p className="font-serif italic text-sm">No bulkers currently in transit.</p>
-                  <p className="text-[10px] text-slate-400">All dispatches logged, weighed, and archived.</p>
+
+              {/* Recharts Bar Chart Container */}
+              <div className="h-48 w-full mt-2 select-none">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={themeMode === 'dark' ? '#1E293B' : '#E5E7EB'} vertical={false} />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fill: themeMode === 'dark' ? '#94A3B8' : '#4B5563', fontSize: 9, fontFamily: 'monospace' }} 
+                      axisLine={{ stroke: themeMode === 'dark' ? '#334155' : '#000000', strokeWidth: 1.5 }}
+                      tickLine={{ stroke: themeMode === 'dark' ? '#334155' : '#000000', strokeWidth: 1.5 }}
+                    />
+                    <YAxis 
+                      tick={{ fill: themeMode === 'dark' ? '#94A3B8' : '#4B5563', fontSize: 9, fontFamily: 'monospace' }}
+                      axisLine={{ stroke: themeMode === 'dark' ? '#334155' : '#000000', strokeWidth: 1.5 }}
+                      tickLine={{ stroke: themeMode === 'dark' ? '#334155' : '#000000', strokeWidth: 1.5 }}
+                    />
+                    <Tooltip 
+                      cursor={{ fill: themeMode === 'dark' ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)' }}
+                      contentStyle={{ 
+                        backgroundColor: themeMode === 'dark' ? '#0f1115' : '#FFFFFF', 
+                        border: themeMode === 'dark' ? '2px solid #334155' : '2px solid #000000',
+                        color: themeMode === 'dark' ? '#F1F5F9' : '#1A1A1A',
+                        borderRadius: '0px',
+                        fontFamily: 'monospace',
+                        fontSize: '10px',
+                        padding: '6px 10px'
+                      }} 
+                    />
+                    <Bar dataKey="Tonnage" fill="#E65100" radius={0}>
+                      {chartData.map((entry, index) => {
+                        const isCurrentMonth = index === new Date().getMonth();
+                        return (
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={isCurrentMonth ? (themeMode === 'dark' ? '#90CAF9' : '#000000') : '#E65100'} 
+                          />
+                        );
+                      })}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Recent Activity Feed */}
+          <div className={`lg:col-span-5 border-[3px] p-5 transition-all duration-300 flex flex-col justify-between ${
+            themeMode === 'dark' 
+              ? 'bg-[#12141a] border-slate-800 text-slate-100 shadow-[5px_5px_0px_0px_rgba(66,165,245,0.3)]' 
+              : 'bg-white border-black text-[#1A1A1A] shadow-[5px_5px_0px_0px_rgba(0,0,0,1)]'
+          }`}>
+            <div>
+              <div className={`flex items-center justify-between border-b-[2px] pb-3 mb-4 ${
+                themeMode === 'dark' ? 'border-slate-800' : 'border-black'
+              }`}>
+                <div className="flex items-center space-x-2">
+                  <span className="h-2.5 w-2.5 bg-[#E65100] shrink-0 inline-block animate-pulse" />
+                  <h3 className={`font-serif font-extrabold italic text-xs md:text-sm tracking-wide uppercase ${
+                    themeMode === 'dark' ? 'text-white' : 'text-neutral-900'
+                  }`}>
+                    Recent Despatch Log Feed
+                  </h3>
+                </div>
+                <span className={`font-mono text-[9px] font-bold px-2 py-0.5 uppercase tracking-wide border ${
+                  themeMode === 'dark' 
+                    ? 'text-slate-300 bg-slate-800/60 border-slate-700' 
+                    : 'text-neutral-500 bg-neutral-100 border-neutral-200'
+                }`}>
+                  Live Entries
+                </span>
+              </div>
+
+              {recentDos.length === 0 ? (
+                <div className={`py-12 text-center border border-dashed rounded-none ${
+                  themeMode === 'dark' ? 'border-slate-800 bg-slate-900/20' : 'border-[#D1D1CF] bg-[#F9F8F6]'
+                }`}>
+                  <p className="font-serif italic text-xs text-stone-500">
+                    No active dispatch records found in database. Once new Despatch Orders are created, they will appear here in real-time.
+                  </p>
                 </div>
               ) : (
-                dos.filter(item => item.status === 'In Transit').map((item, idx) => {
-                  const correlatedPo = pos.find(p => p.id === item.poId);
-                  const correlatedVendor = correlatedPo ? vendors.find(v => v.id === correlatedPo.vendorId) : null;
-                  return (
-                    <div key={item.id} className={`pt-4 ${idx === 0 ? 'pt-0' : ''} space-y-2.5 flex items-start gap-3`}>
-                      <div className="pt-1 select-none">
-                        <input 
-                          type="checkbox"
-                          checked={selectedTransitIds.includes(item.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedTransitIds(prev => [...prev, item.id]);
-                            } else {
-                              setSelectedTransitIds(prev => prev.filter(uid => uid !== item.id));
-                            }
-                          }}
-                          className="h-4 w-4 rounded-none text-[#E65100] border-[#D1D1CF] focus:ring-[#E65100] accent-[#E65100] cursor-pointer"
-                        />
-                      </div>
-                      <div className="flex-1 space-y-2.5">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="text-[10px] font-mono text-white font-bold tracking-wide uppercase px-2 py-0.5 bg-[#1A1A1A]">
-                              {item.vehicleNumber}
-                            </span>
-                            <h4 className="text-xs font-bold text-[#1A1A1A] mt-2">{correlatedVendor?.name}</h4>
-                            <p className="text-[11px] text-[#888884] font-medium">{item.vendorPlant}</p>
+                <div className={`divide-y divide-dotted ${
+                  themeMode === 'dark' ? 'divide-slate-800' : 'divide-stone-300'
+                }`}>
+                  {recentDos.map((doItem, idx) => {
+                    const trName = transporters?.find(t => t.id === doItem.transporterId)?.name || 'Direct / Courier';
+                    
+                    // Status badge style
+                    let statusColorBg = themeMode === 'dark' 
+                      ? 'bg-amber-950/40 text-amber-350 border-amber-500/20' 
+                      : 'bg-[#FFF9C4] text-[#7F5F00] border-[#FBC02D]/40';
+                    if (doItem.status === 'Delivered') {
+                      statusColorBg = themeMode === 'dark'
+                        ? 'bg-emerald-950/40 text-emerald-350 border-emerald-550/20'
+                        : 'bg-[#E8F5E9] text-emerald-800 border-emerald-500/30';
+                    } else if (doItem.status === 'Cancelled') {
+                      statusColorBg = themeMode === 'dark'
+                        ? 'bg-red-950/40 text-red-350 border-red-500/20'
+                        : 'bg-[#FFEBEE] text-red-700 border-red-500/20';
+                    }
+
+                    return (
+                      <div key={doItem.id} className="flex flex-col sm:flex-row sm:items-center justify-between py-2.5 first:pt-0 last:pb-0 gap-2">
+                        <div className="flex items-start space-x-2.5">
+                          <div className={`h-6 w-6 flex items-center justify-center shrink-0 text-[10px] font-mono font-bold border transition-colors ${
+                            themeMode === 'dark' 
+                              ? 'bg-slate-800/80 border-slate-700 text-slate-300 shadow-[1px_1px_0px_0px_rgba(255,255,255,0.1)]' 
+                              : 'bg-[#F9F8F6] border-black text-stone-700 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)]'
+                          }`}>
+                            {idx + 1}
                           </div>
-                          <div className="text-right">
-                            <p className="text-base font-serif font-bold text-[#1A1A1A]">
-                              {item.loadedWeight !== null ? `${item.loadedWeight.toFixed(2)} MT` : 'Pending'}
+                          
+                          <div className="space-y-0.5">
+                            <div className="flex items-center space-x-2 flex-wrap gap-y-0.5">
+                              <span className={`font-sans font-black text-xs tracking-tight ${
+                                themeMode === 'dark' ? 'text-white' : 'text-neutral-900'
+                              }`}>
+                                {doItem.doNumber}
+                              </span>
+                              <span className={`font-mono text-[9px] px-1 border ${
+                                themeMode === 'dark' 
+                                  ? 'text-slate-300 bg-slate-800/40 border-slate-700' 
+                                  : 'text-stone-500 bg-stone-100 border-[#D1D1CF]/40'
+                              }`}>
+                                {doItem.vehicleNumber || 'No Vehicle'}
+                              </span>
+                            </div>
+                            
+                            <p className="text-[10px] text-stone-500 leading-none">
+                              Carrier: <span className={`font-semibold truncate block max-w-[150px] sm:inline-block ${
+                                themeMode === 'dark' ? 'text-slate-300' : 'text-stone-800'
+                              }`}>{trName}</span>
+                              {doItem.loadedWeight !== null && (
+                                <span className={`ml-1.5 font-mono text-[8px] px-0.5 border ${
+                                  themeMode === 'dark' 
+                                    ? 'bg-slate-800 text-slate-300 border-slate-700' 
+                                    : 'bg-stone-150 border-stone-200'
+                                }`}>
+                                  {doItem.loadedWeight} MT
+                                </span>
+                              )}
                             </p>
-                            <span className="text-[10px] text-[#888884] block font-mono">{item.date}</span>
                           </div>
                         </div>
-                        
-                        <div className="flex justify-between items-center text-[10px] text-neutral-800 bg-[#F4F4F1] py-1.5 px-2.5 border border-[#D1D1CF]">
-                          <span>Material: <b className="font-serif italic text-[#E65100]">{correlatedPo?.material}</b></span>
-                          <button
-                            onClick={() => onNavigate('dispatch')}
-                            className="text-[#E65100] hover:underline font-bold font-serif italic"
-                          >
-                            Deliver Weighment →
-                          </button>
+
+                        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                          <span className="font-mono text-[9px] text-[#888884]">
+                            {new Date(doItem.createdAt || doItem.date).toLocaleDateString(undefined, {
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </span>
+                          
+                          <div className={`px-1.5 py-0.5 border text-[8px] font-bold uppercase tracking-wider ${statusColorBg}`}>
+                            {doItem.status}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )}
+            </div>
+
+            <div className={`border-t border-dotted pt-3 mt-3 flex justify-between items-center text-[9px] font-mono ${
+              themeMode === 'dark' ? 'border-slate-800 text-slate-500' : 'border-stone-300 text-stone-400'
+            }`}>
+              <span>Automatic real-time sync active</span>
+              <span>Showing last 5 entries</span>
             </div>
           </div>
 
         </div>
-
       </div>
 
     </div>
